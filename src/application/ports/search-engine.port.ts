@@ -1,4 +1,4 @@
-import { Rule } from '../../../core/domain/entities/rule.entity';
+import { Rule } from '@core/domain/entities/rule.entity';
 
 export interface SearchResult {
   rule: Rule;

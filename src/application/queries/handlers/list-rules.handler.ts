@@ -1,5 +1,5 @@
 import { QueryHandler, IQueryHandler } from '@nestjs/cqrs';
-import { ListRulesQuery } from './list-rules.query';
+import { ListRulesQuery } from '../list-rules/list-rules.query';
 import { RuleRepository } from '../../../core/domain/ports/rule-repository.port';
 import { Rule } from '../../../core/domain/entities/rule.entity';
 

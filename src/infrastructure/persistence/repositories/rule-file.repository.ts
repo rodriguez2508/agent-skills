@@ -4,7 +4,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { Rule, RuleImpact } from '../../../core/domain/entities/rule.entity';
 import { RuleRepository } from '../../../core/domain/ports/rule-repository.port';
-import bm25Config from './bm25.config';
+import bm25Config from '../../search/bm25/bm25.config';
 
 @Injectable()
 export class RuleFileRepository implements RuleRepository {

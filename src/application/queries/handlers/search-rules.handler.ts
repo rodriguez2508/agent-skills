@@ -1,5 +1,5 @@
 import { QueryHandler, IQueryHandler } from '@nestjs/cqrs';
-import { SearchRulesQuery } from './search-rules.query';
+import { SearchRulesQuery } from '../search-rules/search-rules.query';
 import { RuleRepository } from '../../../core/domain/ports/rule-repository.port';
 import { Rule } from '../../../core/domain/entities/rule.entity';
 
@@ -9,7 +9,7 @@ export interface SearchResult {
 }
 
 @QueryHandler(SearchRulesQuery)
-export class SearchRulesHandler implements IQueryHandler<SearchRulesQuery, SearchResult[]> {
+export class SearchRulesHandler {
   constructor(private readonly ruleRepository: RuleRepository) {}
 
   async execute(query: SearchRulesQuery): Promise<SearchResult[]> {

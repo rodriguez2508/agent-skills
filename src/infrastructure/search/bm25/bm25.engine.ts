@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { SearchEngine, SearchResult } from '../../application/ports/search-engine.port';
+import { SearchEngine, SearchResult } from '../../../application/ports/search-engine.port';
 import { Rule } from '../../../core/domain/entities/rule.entity';
 
 export interface BM25Config {

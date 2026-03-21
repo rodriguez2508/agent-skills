@@ -4,9 +4,13 @@ import { CqrsModule, QueryBus } from '@nestjs/cqrs';
 import * as grpc from '@grpc/grpc-js';
 import * as protoLoader from '@grpc/proto-loader';
 import { join } from 'path';
-import { SearchRulesQuery } from '../../application/queries/search-rules/search-rules.query';
-import { GetRuleQuery } from '../../application/queries/get-rule/get-rule.query';
-import { ListRulesQuery } from '../../application/queries/list-rules/list-rules.query';
+import { SearchRulesQuery } from '../../../application/queries/search-rules/search-rules.query';
+import { GetRuleQuery } from '../../../application/queries/get-rule/get-rule.query';
+import { ListRulesQuery } from '../../../application/queries/list-rules/list-rules.query';
+
+interface GrpcCallback<T> {
+  (err: grpc.ServiceError | null, value?: T): void;
+}
 
 @Injectable()
 export class GrpcServerAdapter implements OnModuleInit, OnModuleDestroy {
@@ -67,7 +71,7 @@ export class GrpcServerAdapter implements OnModuleInit, OnModuleDestroy {
 
   private async searchRules(
     call: grpc.ServerUnaryCall<any, any>,
-    callback: grpc.sendUnaryCallback<any>,
+    callback: GrpcCallback<any>,
   ): Promise<void> {
     try {
       const { query, category, limit } = call.request;
@@ -76,7 +80,7 @@ export class GrpcServerAdapter implements OnModuleInit, OnModuleDestroy {
       );
       callback(null, { results });
     } catch (error) {
-      callback(error as Error);
+      callback(error as grpc.ServiceError);
     }
   }
 
@@ -103,20 +107,20 @@ export class GrpcServerAdapter implements OnModuleInit, OnModuleDestroy {
 
   private async getRule(
     call: grpc.ServerUnaryCall<any, any>,
-    callback: grpc.sendUnaryCallback<any>,
+    callback: GrpcCallback<any>,
   ): Promise<void> {
     try {
       const { id } = call.request;
       const rule = await this.queryBus.execute(new GetRuleQuery(id));
       callback(null, { rule });
     } catch (error) {
-      callback(error as Error);
+      callback(error as grpc.ServiceError);
     }
   }
 
   private async listRules(
     call: grpc.ServerUnaryCall<any, any>,
-    callback: grpc.sendUnaryCallback<any>,
+    callback: GrpcCallback<any>,
   ): Promise<void> {
     try {
       const { category, limit } = call.request;
@@ -125,7 +129,7 @@ export class GrpcServerAdapter implements OnModuleInit, OnModuleDestroy {
       );
       callback(null, { rules });
     } catch (error) {
-      callback(error as Error);
+      callback(error as grpc.ServiceError);
     }
   }
 
@@ -154,7 +158,7 @@ export class GrpcServerAdapter implements OnModuleInit, OnModuleDestroy {
 
   private healthCheck(
     call: grpc.ServerUnaryCall<any, any>,
-    callback: grpc.sendUnaryCallback<any>,
+    callback: GrpcCallback<any>,
   ): void {
     callback(null, {
       status: 'ok',
