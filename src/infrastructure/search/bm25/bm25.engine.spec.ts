@@ -1,11 +1,17 @@
 import { BM25Engine } from './bm25.engine';
-import { Rule, RuleImpact } from '../../../core/domain/entities/rule.entity';
+import { Rule, RuleImpact } from '@core/domain/entities/rule.entity';
+
+// Mock ConfigService
+const mockConfigService = {
+  get: jest.fn((key: string, defaultValue: any) => defaultValue),
+};
 
 describe('BM25Engine', () => {
   let engine: BM25Engine;
 
   beforeEach(() => {
-    engine = new BM25Engine({ k1: 1.5, b: 0.75 });
+    jest.clearAllMocks();
+    engine = new BM25Engine(mockConfigService as any);
   });
 
   const createMockRule = (id: string, name: string, content: string, category: string): Rule => {
