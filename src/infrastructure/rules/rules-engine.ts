@@ -33,7 +33,7 @@ export class RulesEngine implements OnModuleInit {
   }
 
   /**
-   * Carga todas las reglas desde archivos .md
+   * Carga todas las reglas desde archivos .md (recorre subdirectorios)
    */
   async loadRules(): Promise<void> {
     const rulesDir = path.join(process.cwd(), this.rulesPath);
@@ -43,11 +43,11 @@ export class RulesEngine implements OnModuleInit {
       return;
     }
 
-    const files = fs.readdirSync(rulesDir).filter((file) => file.endsWith('.md') && !file.startsWith('_'));
+    // Recorrer subdirectorios y cargar archivos .md
+    const files = this.getAllMarkdownFiles(rulesDir);
 
     for (const file of files) {
-      const filePath = path.join(rulesDir, file);
-      const content = fs.readFileSync(filePath, 'utf-8');
+      const content = fs.readFileSync(file, 'utf-8');
       const rule = this.parseRuleFile(file, content);
 
       if (rule) {
@@ -57,6 +57,28 @@ export class RulesEngine implements OnModuleInit {
     }
 
     this.logger.log(`📚 Loaded ${this.rules.size} rules from ${rulesDir}`);
+  }
+
+  /**
+   * Obtiene todos los archivos .md de un directorio y sus subdirectorios
+   */
+  private getAllMarkdownFiles(dir: string): string[] {
+    const files: string[] = [];
+
+    const entries = fs.readdirSync(dir, { withFileTypes: true });
+
+    for (const entry of entries) {
+      const fullPath = path.join(dir, entry.name);
+
+      if (entry.isDirectory()) {
+        // Recorrer subdirectorios recursivamente
+        files.push(...this.getAllMarkdownFiles(fullPath));
+      } else if (entry.isFile() && entry.name.endsWith('.md') && !entry.name.startsWith('_')) {
+        files.push(fullPath);
+      }
+    }
+
+    return files;
   }
 
   /**

@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Body, Query } from '@nestjs/common';
+import { Controller, Get, Post, Body, Query, BadRequestException } from '@nestjs/common';
 import { QueryBus } from '@nestjs/cqrs';
 import { ApiTags, ApiOperation, ApiOkResponse } from '@nestjs/swagger';
 import { SearchRulesQuery } from '@application/queries/search-rules/search-rules.query';
@@ -34,10 +34,19 @@ export class RulesController {
   async searchGet(
     @Query('q') query: string,
     @Query('category') category?: string,
-    @Query('limit') limit?: number,
+    @Query('limit') limit?: string,
   ) {
+    if (!query) {
+      throw new BadRequestException('Query parameter "q" is required');
+    }
+
+    const limitValue = limit ? parseInt(limit, 10) : 10;
+    if (isNaN(limitValue) || limitValue < 1 || limitValue > 100) {
+      throw new BadRequestException('Limit must be between 1 and 100');
+    }
+
     const results = await this.queryBus.execute(
-      new SearchRulesQuery(query, category, limit ? parseInt(limit.toString(), 10) : 10),
+      new SearchRulesQuery(query, category, limitValue),
     );
     return { results };
   }
@@ -49,6 +58,10 @@ export class RulesController {
     type: RuleResponseDto,
   })
   async getRule(@Query('id') id: string) {
+    if (!id) {
+      throw new BadRequestException('Query parameter "id" is required');
+    }
+
     const rule = await this.queryBus.execute(new GetRuleQuery(id));
     return { rule };
   }
@@ -61,10 +74,15 @@ export class RulesController {
   })
   async listRules(
     @Query('category') category?: string,
-    @Query('limit') limit?: number,
+    @Query('limit') limit?: string,
   ) {
+    const limitValue = limit ? parseInt(limit, 10) : 50;
+    if (isNaN(limitValue) || limitValue < 1 || limitValue > 200) {
+      throw new BadRequestException('Limit must be between 1 and 200');
+    }
+
     const rules = await this.queryBus.execute(
-      new ListRulesQuery(category, limit ? parseInt(limit.toString(), 10) : 50),
+      new ListRulesQuery(category, limitValue),
     );
     return { rules };
   }

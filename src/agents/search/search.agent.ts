@@ -1,7 +1,7 @@
 import { Injectable, Inject } from '@nestjs/common';
 import { BaseAgent } from '@core/agents/base.agent';
 import { AgentRequest } from '@core/agents/agent-response';
-import { RULE_REPOSITORY } from '@core/domain/ports/rule-repository.token';
+import { RULE_REPOSITORY, RuleRepository } from '@core/domain/ports/rule-repository.token';
 import { BM25Engine } from '@infrastructure/search/bm25/bm25.engine';
 import { AgentLoggerService } from '@infrastructure/logging/agent-logger.service';
 import { RulesEngine } from '@infrastructure/rules/rules-engine';
@@ -12,9 +12,12 @@ import { RulesEngine } from '@infrastructure/rules/rules-engine';
  */
 @Injectable()
 export class SearchAgent extends BaseAgent {
+  private lastIndexedCategory?: string;
+  private isIndexed = false;
+
   constructor(
     @Inject(RULE_REPOSITORY)
-    private readonly ruleRepository: any,
+    private readonly ruleRepository: RuleRepository,
     private readonly bm25Engine: BM25Engine,
     private readonly agentLogger: AgentLoggerService,
     private readonly rulesEngine: RulesEngine,
@@ -39,16 +42,21 @@ export class SearchAgent extends BaseAgent {
       limit,
     });
 
-    // Get rules (filtered by category if exists)
-    const rules = category
-      ? await this.ruleRepository.findByCategory(category)
-      : await this.ruleRepository.findAll();
+    // Re-index only if category changed or not indexed
+    if (!this.isIndexed || this.lastIndexedCategory !== category) {
+      this.agentLogger.debug(this.agentId, 'Re-indexing rules...');
+      const rules = category
+        ? await this.ruleRepository.findByCategory(category)
+        : await this.ruleRepository.findAll();
 
-    this.agentLogger.debug(this.agentId, `Rules obtained: ${rules.length}`);
-
-    // Index rules in BM25
-    this.bm25Engine.clear();
-    rules.forEach((rule) => this.bm25Engine.index(rule));
+      this.bm25Engine.clear();
+      rules.forEach((rule) => this.bm25Engine.index(rule));
+      this.lastIndexedCategory = category;
+      this.isIndexed = true;
+      this.agentLogger.debug(this.agentId, `Indexed ${rules.length} rules`);
+    } else {
+      this.agentLogger.debug(this.agentId, 'Using cached index');
+    }
 
     // Search with BM25
     const searchResults = this.bm25Engine.search(query, limit);
@@ -94,13 +102,14 @@ export class SearchAgent extends BaseAgent {
       'encuentra',
       'search',
       'qué hay',
-      'mostrar',
-      'cómo',
-      'cuál',
-      'quiero',
-      'necesito',
-      'find',
+      'mostrar reglas',
+      'listar reglas',
+      'find rule',
       'look for',
+      'clean architecture',
+      'cqrs',
+      'nestjs',
+      'typescript',
     ];
 
     return searchKeywords.some((keyword) => input.toLowerCase().includes(keyword));

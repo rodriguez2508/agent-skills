@@ -3,6 +3,7 @@ import { ConfigService } from '@nestjs/config';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { SSEServerTransport } from '@modelcontextprotocol/sdk/server/sse.js';
 import { z } from 'zod';
+import { Response } from 'express';
 
 export interface McpSession {
   server: McpServer;
@@ -13,7 +14,7 @@ export interface McpSession {
 export class McpService {
   private readonly logger = new Logger(McpService.name);
   private readonly apiPort: number;
-  
+
   // Almacena sesiones activas por sessionId
   private sessions: Map<string, McpSession> = new Map();
 
@@ -24,7 +25,7 @@ export class McpService {
   /**
    * Crea una nueva sesión MCP con su transporte
    */
-  async createSession(res: any): Promise<{ sessionId: string; session: McpSession }> {
+  async createSession(res: Response): Promise<{ sessionId: string; session: McpSession }> {
     const transport = new SSEServerTransport('/mcp/message', res);
     
     const server = new McpServer(

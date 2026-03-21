@@ -12,10 +12,10 @@ export class RuleFileRepository implements RuleRepository {
   private cache: Map<string, Rule> = new Map();
 
   constructor(private readonly configService: ConfigService) {
-    const rulesPathConfig = this.configService.get<string>('RULES_PATH', './rules');
+    const rulesPathConfig = this.configService.get<string>('RULES_PATH', './src/rules');
     // Convertir a ruta absoluta si es relativa
-    this.rulesPath = rulesPathConfig.startsWith('/') 
-      ? rulesPathConfig 
+    this.rulesPath = rulesPathConfig.startsWith('/')
+      ? rulesPathConfig
       : path.join(process.cwd(), rulesPathConfig);
     this.ensureRulesPathExists();
     this.logger.log(`📂 Rules path initialized: ${this.rulesPath}`);
