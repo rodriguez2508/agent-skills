@@ -21,7 +21,8 @@
       "@core/*": ["src/core/*"],
       "@application/*": ["src/application/*"],
       "@infrastructure/*": ["src/infrastructure/*"],
-      "@presentation/*": ["src/presentation/*"]
+      "@presentation/*": ["src/presentation/*"],
+      "@agents/*": ["src/agents/*"]
     }
   },
   "ts-node": {

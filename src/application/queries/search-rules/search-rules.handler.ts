@@ -1,6 +1,6 @@
 import { Inject } from '@nestjs/common';
 import { QueryHandler } from '@nestjs/cqrs';
-import { SearchRulesQuery } from '../search-rules/search-rules.query';
+import { SearchRulesQuery } from './search-rules.query';
 import { Rule } from '@core/domain/entities/rule.entity';
 import { RULE_REPOSITORY } from '@core/domain/ports/rule-repository.token';
 

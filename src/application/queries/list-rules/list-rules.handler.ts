@@ -1,6 +1,6 @@
 import { Inject } from '@nestjs/common';
 import { QueryHandler } from '@nestjs/cqrs';
-import { ListRulesQuery } from '../list-rules/list-rules.query';
+import { ListRulesQuery } from './list-rules.query';
 import { Rule } from '@core/domain/entities/rule.entity';
 import { RULE_REPOSITORY } from '@core/domain/ports/rule-repository.token';
 

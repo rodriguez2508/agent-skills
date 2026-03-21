@@ -1,0 +1,45 @@
+{
+  "security": {
+    "auth": {
+      "selectedType": "qwen-oauth"
+    }
+  },
+  "model": {
+    "name": "coder-model"
+  },
+  "systemPrompt": {
+    "enabled": true,
+    "file": "~/.qwen/INSTRUCTIONS.md",
+    "priority": "critical",
+    "overrideDefaults": true
+  },
+  "mcp": {
+    "enabled": true,
+    "autoActivateSkills": true,
+    "autoRunSuggestSkills": true,
+    "preferMcpOverInternalTools": true
+  },
+  "mcpServers": {
+    "agent-skills-api": {
+      "url": "http://localhost:8004/mcp/sse",
+      "trust": true,
+      "priority": "high"
+    }
+  },
+  "language": {
+    "user": "es",
+    "code": "en",
+    "force": true
+  },
+  "preferences": {
+    "language": "es",
+    "codeComments": "en",
+    "logsLanguage": "en",
+    "friendlyResponses": true,
+    "alwaysUseMcpForRules": true
+  },
+  "$version": 3,
+  "general": {
+    "gitCoAuthor": false
+  }
+}

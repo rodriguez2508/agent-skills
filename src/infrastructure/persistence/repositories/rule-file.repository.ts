@@ -1,18 +1,24 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Inject, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import * as fs from 'fs';
 import * as path from 'path';
 import { Rule, RuleImpact } from '@core/domain/entities/rule.entity';
-import { RuleRepository } from '@core/domain/ports/rule-repository.port';
+import { RULE_REPOSITORY, RuleRepository } from '@core/domain/ports/rule-repository.token';
 
 @Injectable()
 export class RuleFileRepository implements RuleRepository {
+  private readonly logger = new Logger(RuleFileRepository.name);
   private readonly rulesPath: string;
   private cache: Map<string, Rule> = new Map();
 
   constructor(private readonly configService: ConfigService) {
-    this.rulesPath = this.configService.get<string>('RULES_PATH', path.join(process.cwd(), 'rules'));
+    const rulesPathConfig = this.configService.get<string>('RULES_PATH', './rules');
+    // Convertir a ruta absoluta si es relativa
+    this.rulesPath = rulesPathConfig.startsWith('/') 
+      ? rulesPathConfig 
+      : path.join(process.cwd(), rulesPathConfig);
     this.ensureRulesPathExists();
+    this.logger.log(`📂 Rules path initialized: ${this.rulesPath}`);
   }
 
   async findById(id: string): Promise<Rule | null> {
