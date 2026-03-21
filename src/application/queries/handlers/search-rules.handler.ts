@@ -1,7 +1,8 @@
-import { QueryHandler, IQueryHandler } from '@nestjs/cqrs';
+import { Inject } from '@nestjs/common';
+import { QueryHandler } from '@nestjs/cqrs';
 import { SearchRulesQuery } from '../search-rules/search-rules.query';
-import { RuleRepository } from '../../../core/domain/ports/rule-repository.port';
-import { Rule } from '../../../core/domain/entities/rule.entity';
+import { Rule } from '@core/domain/entities/rule.entity';
+import { RULE_REPOSITORY } from '@core/domain/ports/rule-repository.token';
 
 export interface SearchResult {
   rule: Rule;
@@ -10,7 +11,10 @@ export interface SearchResult {
 
 @QueryHandler(SearchRulesQuery)
 export class SearchRulesHandler {
-  constructor(private readonly ruleRepository: RuleRepository) {}
+  constructor(
+    @Inject(RULE_REPOSITORY)
+    private readonly ruleRepository: any,
+  ) {}
 
   async execute(query: SearchRulesQuery): Promise<SearchResult[]> {
     const rules = query.category

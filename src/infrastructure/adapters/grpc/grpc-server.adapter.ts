@@ -4,9 +4,9 @@ import { CqrsModule, QueryBus } from '@nestjs/cqrs';
 import * as grpc from '@grpc/grpc-js';
 import * as protoLoader from '@grpc/proto-loader';
 import { join } from 'path';
-import { SearchRulesQuery } from '../../../application/queries/search-rules/search-rules.query';
-import { GetRuleQuery } from '../../../application/queries/get-rule/get-rule.query';
-import { ListRulesQuery } from '../../../application/queries/list-rules/list-rules.query';
+import { SearchRulesQuery } from '@application/queries/search-rules/search-rules.query';
+import { GetRuleQuery } from '@application/queries/get-rule/get-rule.query';
+import { ListRulesQuery } from '@application/queries/list-rules/list-rules.query';
 
 interface GrpcCallback<T> {
   (err: grpc.ServiceError | null, value?: T): void;
@@ -45,7 +45,7 @@ export class GrpcServerAdapter implements OnModuleInit, OnModuleDestroy {
   }
 
   private async initializeGrpcServer(): Promise<void> {
-    const protoPath = join(__dirname, '../proto/agent-skill.proto');
+    const protoPath = join(process.cwd(), 'src/proto/agent-skill.proto');
     const packageDefinition = protoLoader.loadSync(protoPath, {
       keepCase: true,
       longs: String,

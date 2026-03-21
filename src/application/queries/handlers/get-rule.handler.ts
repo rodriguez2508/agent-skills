@@ -1,11 +1,15 @@
-import { QueryHandler, IQueryHandler } from '@nestjs/cqrs';
+import { Inject } from '@nestjs/common';
+import { QueryHandler } from '@nestjs/cqrs';
 import { GetRuleQuery } from '../get-rule/get-rule.query';
-import { RuleRepository } from '../../../core/domain/ports/rule-repository.port';
-import { Rule } from '../../../core/domain/entities/rule.entity';
+import { Rule } from '@core/domain/entities/rule.entity';
+import { RULE_REPOSITORY } from '@core/domain/ports/rule-repository.token';
 
 @QueryHandler(GetRuleQuery)
-export class GetRuleHandler implements IQueryHandler<GetRuleQuery, Rule | null> {
-  constructor(private readonly ruleRepository: RuleRepository) {}
+export class GetRuleHandler {
+  constructor(
+    @Inject(RULE_REPOSITORY)
+    private readonly ruleRepository: any,
+  ) {}
 
   async execute(query: GetRuleQuery): Promise<Rule | null> {
     return this.ruleRepository.findById(query.id);

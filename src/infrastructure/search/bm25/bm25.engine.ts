@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
-import { SearchEngine, SearchResult } from '../../../application/ports/search-engine.port';
-import { Rule } from '../../../core/domain/entities/rule.entity';
+import { ConfigService } from '@nestjs/config';
+import { SearchEngine, SearchResult } from '@application/ports/search-engine.port';
+import { Rule } from '@core/domain/entities/rule.entity';
 
 export interface BM25Config {
   k1: number;
@@ -16,9 +17,9 @@ export class BM25Engine implements SearchEngine {
   private readonly k1: number;
   private readonly b: number;
 
-  constructor(config?: BM25Config) {
-    this.k1 = config?.k1 ?? 1.5;
-    this.b = config?.b ?? 0.75;
+  constructor(private readonly configService: ConfigService) {
+    this.k1 = this.configService.get<number>('BM25_K1', 1.5);
+    this.b = this.configService.get<number>('BM25_B', 0.75);
   }
 
   index(rule: Rule): void {

@@ -1,11 +1,15 @@
-import { QueryHandler, IQueryHandler } from '@nestjs/cqrs';
+import { Inject } from '@nestjs/common';
+import { QueryHandler } from '@nestjs/cqrs';
 import { ListRulesQuery } from '../list-rules/list-rules.query';
-import { RuleRepository } from '../../../core/domain/ports/rule-repository.port';
-import { Rule } from '../../../core/domain/entities/rule.entity';
+import { Rule } from '@core/domain/entities/rule.entity';
+import { RULE_REPOSITORY } from '@core/domain/ports/rule-repository.token';
 
 @QueryHandler(ListRulesQuery)
-export class ListRulesHandler implements IQueryHandler<ListRulesQuery, Rule[]> {
-  constructor(private readonly ruleRepository: RuleRepository) {}
+export class ListRulesHandler {
+  constructor(
+    @Inject(RULE_REPOSITORY)
+    private readonly ruleRepository: any,
+  ) {}
 
   async execute(query: ListRulesQuery): Promise<Rule[]> {
     if (query.category) {

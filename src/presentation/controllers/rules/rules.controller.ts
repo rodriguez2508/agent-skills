@@ -1,11 +1,11 @@
 import { Controller, Get, Post, Body, Query } from '@nestjs/common';
 import { QueryBus } from '@nestjs/cqrs';
 import { ApiTags, ApiOperation, ApiOkResponse } from '@nestjs/swagger';
-import { SearchRulesQuery } from '../../../application/queries/search-rules/search-rules.query';
-import { GetRuleQuery } from '../../../application/queries/get-rule/get-rule.query';
-import { ListRulesQuery } from '../../../application/queries/list-rules/list-rules.query';
-import { SearchRulesDto } from '../../dto/search-rules.dto';
-import { RuleResponseDto, RuleResultDto } from '../../dto/rule-response.dto';
+import { SearchRulesQuery } from '@application/queries/search-rules/search-rules.query';
+import { GetRuleQuery } from '@application/queries/get-rule/get-rule.query';
+import { ListRulesQuery } from '@application/queries/list-rules/list-rules.query';
+import { SearchRulesDto } from '@presentation/dto/search-rules.dto';
+import { RuleResponseDto, RuleResultDto } from '@presentation/dto/rule-response.dto';
 
 @ApiTags('Rules')
 @Controller('rules')

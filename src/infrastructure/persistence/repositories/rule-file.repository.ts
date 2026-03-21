@@ -1,21 +1,17 @@
-import { Injectable, Inject } from '@nestjs/common';
-import { ConfigType } from '@nestjs/config';
+import { Injectable } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import * as fs from 'fs';
 import * as path from 'path';
-import { Rule, RuleImpact } from '../../../core/domain/entities/rule.entity';
-import { RuleRepository } from '../../../core/domain/ports/rule-repository.port';
-import bm25Config from '../../search/bm25/bm25.config';
+import { Rule, RuleImpact } from '@core/domain/entities/rule.entity';
+import { RuleRepository } from '@core/domain/ports/rule-repository.port';
 
 @Injectable()
 export class RuleFileRepository implements RuleRepository {
   private readonly rulesPath: string;
   private cache: Map<string, Rule> = new Map();
 
-  constructor(
-    @Inject(bm25Config.KEY)
-    private readonly config: ConfigType<typeof bm25Config>,
-  ) {
-    this.rulesPath = process.env.RULES_PATH || path.join(process.cwd(), 'rules');
+  constructor(private readonly configService: ConfigService) {
+    this.rulesPath = this.configService.get<string>('RULES_PATH', path.join(process.cwd(), 'rules'));
     this.ensureRulesPathExists();
   }
 
