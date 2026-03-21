@@ -1,0 +1,84 @@
+syntax = "proto3";
+
+package agent_skill;
+
+service AgentSkillService {
+  // Búsqueda unaria
+  rpc SearchRules(SearchRulesRequest) returns (SearchRulesResponse);
+
+  // Búsqueda con streaming
+  rpc SearchRulesStream(SearchRulesRequest) returns (stream StreamSearchResult);
+
+  // Obtener regla específica
+  rpc GetRule(GetRuleRequest) returns (GetRuleResponse);
+
+  // Listar reglas
+  rpc ListRules(ListRulesRequest) returns (ListRulesResponse);
+
+  // Listar reglas con streaming
+  rpc ListRulesStream(ListRulesRequest) returns (stream StreamRulesBatch);
+
+  // Health check
+  rpc HealthCheck(HealthCheckRequest) returns (HealthCheckResponse);
+}
+
+message SearchRulesRequest {
+  string query = 1;
+  optional string category = 2;
+  optional int32 limit = 3;
+}
+
+message SearchRulesResponse {
+  repeated RuleResult results = 1;
+}
+
+message GetRuleRequest {
+  string id = 1;
+}
+
+message GetRuleResponse {
+  optional Rule rule = 1;
+}
+
+message ListRulesRequest {
+  optional string category = 1;
+  optional int32 limit = 2;
+}
+
+message ListRulesResponse {
+  repeated Rule rules = 1;
+}
+
+message HealthCheckRequest {
+  string service = 1;
+}
+
+message HealthCheckResponse {
+  string status = 1;
+  string version = 2;
+  int64 timestamp = 3;
+}
+
+message Rule {
+  string id = 1;
+  string name = 2;
+  string content = 3;
+  string category = 4;
+  repeated string tags = 5;
+  string impact = 6;
+}
+
+message RuleResult {
+  Rule rule = 1;
+  float score = 2;
+}
+
+message StreamSearchResult {
+  RuleResult result = 1;
+  bool is_last = 2;
+}
+
+message StreamRulesBatch {
+  repeated Rule rules = 1;
+  bool is_last = 2;
+}
