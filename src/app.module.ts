@@ -10,6 +10,7 @@ import { GrpcServerAdapter } from '@infrastructure/adapters/grpc/grpc-server.ada
 // Presentation
 import { HealthController } from '@presentation/controllers/health/health.controller';
 import { RulesController } from '@presentation/controllers/rules/rules.controller';
+import { McpController } from '@presentation/controllers/mcp/mcp.controller';
 
 // Application Handlers
 import { SearchRulesHandler } from '@application/queries/handlers/search-rules.handler';
@@ -27,7 +28,7 @@ import { RULE_REPOSITORY } from '@core/domain/ports/rule-repository.token';
     }),
     CqrsModule,
   ],
-  controllers: [HealthController, RulesController],
+  controllers: [HealthController, RulesController, McpController],
   providers: [
     // Infrastructure
     BM25Engine,
