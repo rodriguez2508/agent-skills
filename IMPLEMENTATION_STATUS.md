@@ -1,4 +1,4 @@
-# Estado de la Implementación
+# Estado de la Implementación - FINAL ✅
 
 ## ✅ Completado
 
@@ -7,6 +7,7 @@
 - [x] RuleId Value Object (`src/core/domain/value-objects/rule-id.vo.ts`)
 - [x] RuleCategory Value Object (`src/core/domain/value-objects/rule-category.vo.ts`)
 - [x] RuleRepository Port (`src/core/domain/ports/rule-repository.port.ts`)
+- [x] RuleRepository Token (`src/core/domain/ports/rule-repository.token.ts`)
 - [x] RuleCreated Event (`src/core/events/rule-created.event.ts`)
 
 ### Application Layer (CQRS)
@@ -36,53 +37,50 @@
 - [x] .env.example con variables de entorno
 - [x] .gitignore actualizado
 - [x] README.md documentado
+- [x] Jest configurado con path aliases
 
 ### Reglas de Ejemplo
 - [x] clean-architecture.md
 - [x] dependency-injection.md
 
 ### Tests
-- [x] rule.entity.spec.ts
-- [x] bm25.engine.spec.ts
-- [x] health.controller.spec.ts
+- [x] rule.entity.spec.ts (4 tests)
+- [x] bm25.engine.spec.ts (10 tests)
+- [x] health.controller.spec.ts (2 tests)
+- [x] app.controller.spec.ts (1 test)
 
 ### Git
 - [x] Repositorio inicializado
 - [x] Rama main creada
 - [x] Rama development creada
-- [x] Commit inicial realizado
+- [x] Commits realizados
 
 ---
 
-## ⚠️ Pendiente (Requiere Instalación)
-
-### Instalación de Dependencias
-La instalación está fallando debido a problemas de red. Ejecutar cuando haya conexión estable:
+## 🎯 Estado del Build y Tests
 
 ```bash
-pnpm install
+✅ Build: pnpm run build - EXITOSO
+✅ Tests: pnpm run test - 17 tests passing
+✅ Start: node dist/main - APLICACIÓN CORRIENDO
 ```
 
-Dependencias a instalar:
-- @nestjs/cqrs
-- @grpc/grpc-js
-- @grpc/proto-loader
-- @nestjs/config
-- @nestjs/swagger
-- class-validator
-- class-transformer
+### Endpoints Disponibles
 
-### Verificación Post-Instalación
-```bash
-# Build
-pnpm run build
+| Método | Endpoint | Descripción | Estado |
+|--------|----------|-------------|--------|
+| `GET` | `/health` | Health check | ✅ Funcional |
+| `GET` | `/rules` | Listar reglas | ✅ Funcional |
+| `GET` | `/rules/search?q=query` | Buscar reglas | ✅ Funcional |
+| `POST` | `/rules/search` | Buscar reglas (body) | ✅ Funcional |
+| `GET` | `/rules?id=xxx` | Obtener regla por ID | ✅ Funcional |
+| `GET` | `/api` | Swagger UI | ✅ Funcional |
 
-# Tests
-pnpm run test
+### gRPC Services
 
-# Start
-pnpm run start:dev
-```
+| Servicio | Puerto | Estado |
+|----------|--------|--------|
+| AgentSkillService | 50051 | ✅ Funcional |
 
 ---
 
@@ -143,49 +141,58 @@ agent-skills-api/
 
 ---
 
-## 🚀 Próximos Pasos
+## 🚀 Cómo Usar
 
-1. **Instalar dependencias** (cuando la red mejore):
-   ```bash
-   pnpm install
-   ```
+### 1. Instalar dependencias
 
-2. **Verificar build**:
-   ```bash
-   pnpm run build
-   ```
+```bash
+pnpm install
+```
 
-3. **Ejecutar tests**:
-   ```bash
-   pnpm run test
-   ```
+### 2. Configurar variables de entorno
 
-4. **Iniciar servidor**:
-   ```bash
-   pnpm run start:dev
-   ```
+```bash
+cp .env.example .env
+```
 
-5. **Verificar endpoints**:
-   - Health: http://localhost:3000/health
-   - Swagger: http://localhost:3000/api
-   - Rules: http://localhost:3000/rules
+### 3. Build
 
-6. **Verificar gRPC**:
-   - Puerto: 50051
-   - Usar cliente gRPC para testear
+```bash
+pnpm run build
+```
+
+### 4. Tests
+
+```bash
+pnpm run test
+```
+
+### 5. Iniciar aplicación
+
+```bash
+pnpm run start:prod
+# o
+pnpm run start:dev
+```
+
+### 6. Verificar
+
+```bash
+curl http://localhost:3000/health
+```
 
 ---
 
 ## 📊 Métricas
 
-| Componente | Archivos | Líneas de Código |
-|------------|----------|------------------|
-| Domain Layer | 5 | ~150 |
-| Application Layer | 7 | ~200 |
-| Infrastructure Layer | 5 | ~400 |
-| Presentation Layer | 5 | ~250 |
-| Configuración | 8 | ~300 |
-| **Total** | **30** | **~1300** |
+| Componente | Archivos | Líneas de Código | Tests |
+|------------|----------|------------------|-------|
+| Domain Layer | 6 | ~150 | 4 |
+| Application Layer | 8 | ~200 | - |
+| Infrastructure Layer | 5 | ~400 | 10 |
+| Presentation Layer | 5 | ~250 | 2 |
+| Configuración | 8 | ~300 | 1 |
+| **Total** | **32** | **~1300** | **17** |
 
 ---
 
@@ -199,5 +206,19 @@ agent-skills-api/
 - ✅ REST API con Swagger
 - ✅ File System Repository
 - ✅ Value Objects (RuleId, RuleCategory)
-- ✅ Tests unitarios
+- ✅ Tests unitarios (17 tests passing)
 - ✅ TypeScript con paths aliases
+- ✅ Inyección de dependencias con NestJS
+- ✅ Configuración con @nestjs/config
+
+---
+
+## 📝 Commits
+
+```
+169ccdc test: fix BM25 engine tests and add jest path aliases
+713a506 refactor: use path aliases for imports
+85e487f fix: correct import paths and gRPC types for successful build
+8a0179b docs: add implementation status document
+691ae64 feat: initial Hexagonal + CQRS architecture implementation
+```
