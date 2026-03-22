@@ -1,0 +1,14 @@
+node_modules
+dist
+npm-debug.log
+.env
+.env.local
+.git
+.gitignore
+*.md
+.vscode
+.idea
+coverage
+.nyc_output
+*.log
+pnpm-lock.yaml

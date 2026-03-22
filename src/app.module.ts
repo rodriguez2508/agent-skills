@@ -10,6 +10,7 @@ import { McpService } from '@infrastructure/adapters/mcp/mcp.service';
 import { AgentLoggerService } from '@infrastructure/logging/agent-logger.service';
 import { RulesEngine } from '@infrastructure/rules/rules-engine';
 import { VectorStorageModule } from '@infrastructure/vector-storage/vector-storage.module';
+import { DatabaseModule } from '@infrastructure/database/database.module';
 
 // Presentation
 import { HealthController } from '@presentation/controllers/health/health.controller';
@@ -42,6 +43,7 @@ import { RULE_REPOSITORY } from '@core/domain/ports/rule-repository.token';
       envFilePath: '.env',
     }),
     CqrsModule,
+    DatabaseModule,
     VectorStorageModule.forRoot({
       type: 'inmemory', // Default for development, change to 'chromadb' for production
       global: true,
