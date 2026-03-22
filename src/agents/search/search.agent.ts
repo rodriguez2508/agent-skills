@@ -36,15 +36,17 @@ export class SearchAgent extends BaseAgent {
     const category = request.options?.category as string | undefined;
     const limit = (request.options?.limit as number) || 5;
 
-    this.agentLogger.info(this.agentId, 'Starting search', {
-      query,
-      category,
+    this.agentLogger.info(this.agentId, `🔍 [SEARCH] Iniciando búsqueda`, {
+      query: query.substring(0, 100),
+      category: category || 'all',
       limit,
     });
 
     // Re-index only if category changed or not indexed
     if (!this.isIndexed || this.lastIndexedCategory !== category) {
-      this.agentLogger.debug(this.agentId, 'Re-indexing rules...');
+      this.agentLogger.info(this.agentId, '📚 [SEARCH] Indexando reglas...', {
+        category: category || 'all',
+      });
       const rules = category
         ? await this.ruleRepository.findByCategory(category)
         : await this.ruleRepository.findAll();
@@ -53,17 +55,31 @@ export class SearchAgent extends BaseAgent {
       rules.forEach((rule) => this.bm25Engine.index(rule));
       this.lastIndexedCategory = category;
       this.isIndexed = true;
-      this.agentLogger.debug(this.agentId, `Indexed ${rules.length} rules`);
+      this.agentLogger.info(this.agentId, `✅ [SEARCH] Indexación completada: ${rules.length} reglas`, {
+        category,
+      });
     } else {
-      this.agentLogger.debug(this.agentId, 'Using cached index');
+      this.agentLogger.debug(this.agentId, '💾 [SEARCH] Usando índice en caché', {
+        lastIndexedCategory: this.lastIndexedCategory,
+      });
     }
 
     // Search with BM25
+    this.agentLogger.debug(this.agentId, '🧮 [SEARCH] Ejecutando algoritmo BM25', {
+      query,
+    });
     const searchResults = this.bm25Engine.search(query, limit);
 
-    this.agentLogger.info(this.agentId, `Search completed: ${searchResults.length} results`);
+    this.agentLogger.info(this.agentId, `✅ [SEARCH] Búsqueda completada: ${searchResults.length} resultados`, {
+      query: query.substring(0, 50),
+      resultsCount: searchResults.length,
+      topScore: searchResults[0]?.score || 0,
+    });
 
     if (searchResults.length === 0) {
+      this.agentLogger.warn(this.agentId, '⚠️ [SEARCH] Sin resultados', {
+        query: query.substring(0, 50),
+      });
       return {
         message: "I couldn't find rules related to your search. Try using different keywords or check the available categories.",
         query,
@@ -85,6 +101,10 @@ export class SearchAgent extends BaseAgent {
       relevance: `${(result.score * 100).toFixed(1)}%`,
       summary: result.rule.content.substring(0, 300) + (result.rule.content.length > 300 ? '...' : ''),
     }));
+
+    this.agentLogger.info(this.agentId, '📦 [SEARCH] Resultados formateados', {
+      formattedCount: formattedResults.length,
+    });
 
     return {
       message: `Great! I found ${searchResults.length} rule${searchResults.length === 1 ? '' : 's'} that might help you:`,

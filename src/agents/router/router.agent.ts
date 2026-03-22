@@ -24,29 +24,38 @@ export class RouterAgent extends BaseAgent {
    * Maneja la solicitud detectando intención y enrutando
    */
   protected async handle(request: AgentRequest): Promise<AgentResponse> {
-    this.agentLogger.info(this.agentId, 'Recibida solicitud de enrutamiento', {
-      input: request.input,
+    this.agentLogger.info(this.agentId, '📥 [ROUTER] Recibida solicitud de enrutamiento', {
+      input: request.input.substring(0, 100),
+      options: request.options,
     });
 
     // Detectar intención
     const intention = this.detectIntention(request.input);
-    
-    this.agentLogger.debug(this.agentId, 'Intención detectada', {
-      intention,
+
+    this.agentLogger.info(this.agentId, `🧠 [ROUTER] Intención detectada: ${intention}`, {
+      confidence: 'high',
     });
 
     // Encontrar agente especializado
     const targetAgent = this.findSpecializedAgent(intention);
 
     if (!targetAgent) {
-      this.agentLogger.warn(this.agentId, 'No se encontró agente especializado', {
-        intention,
+      this.agentLogger.warn(this.agentId, `⚠️ [ROUTER] No se encontró agente especializado para: ${intention}`, {
+        availableAgents: this.agentRegistry.getAgentIds(),
       });
-      
+
       // Si no hay agente especializado, devolver respuesta genérica
       return {
-        success: false,
-        error: 'No hay un agente especializado para esta solicitud',
+        success: true,
+        data: {
+          message: "I understand you're asking about something. Could you be more specific? I can help you with:\n" +
+            "- Searching code rules (Clean Architecture, CQRS, NestJS)\n" +
+            "- Generating code\n" +
+            "- Explaining architecture patterns\n" +
+            "- Analyzing code quality",
+          intention,
+          availableAgents: this.agentRegistry.getAgentIds(),
+        },
         metadata: {
           agentId: this.agentId,
           executionTime: 0,
@@ -55,20 +64,35 @@ export class RouterAgent extends BaseAgent {
       };
     }
 
-    this.agentLogger.info(this.agentId, `Enrutando a ${targetAgent.agentId}`, {
+    this.agentLogger.info(this.agentId, `🔀 [ROUTER] Enrutando a ${targetAgent.agentId}`, {
+      from: this.agentId,
+      to: targetAgent.agentId,
       intention,
-      targetAgent: targetAgent.agentId,
     });
 
     // Ejecutar agente especializado
-    const response = await targetAgent.execute(request);
-
-    this.agentLogger.info(this.agentId, `Respuesta de ${targetAgent.agentId}`, {
-      success: response.success,
-      executionTime: response.metadata?.executionTime,
+    this.agentLogger.info(targetAgent.agentId, `▶️ [EXEC] Ejecutando agente especializado`, {
+      request: request.input.substring(0, 100),
     });
 
-    return response;
+    const response = await targetAgent.execute(request);
+
+    this.agentLogger.info(this.agentId, `📤 [ROUTER] Respuesta recibida de ${targetAgent.agentId}`, {
+      success: response.success,
+      executionTime: response.metadata?.executionTime,
+      hasError: !!response.error,
+    });
+
+    // Retornar respuesta con contexto de enrutamiento
+    return {
+      ...response,
+      data: {
+        ...response.data,
+        routedBy: this.agentId,
+        targetAgent: targetAgent.agentId,
+        intention,
+      },
+    };
   }
 
   /**

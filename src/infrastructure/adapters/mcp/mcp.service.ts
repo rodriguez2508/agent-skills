@@ -78,7 +78,16 @@ export class McpService {
     return this.sessions.get(sessionId);
   }
 
+  /**
+   * Obtiene todas las sesiones (para debug)
+   */
+  getSessions(): Map<string, McpSession> {
+    return this.sessions;
+  }
+
   private registerTools(server: McpServer) {
+    this.logger.log('🔧 MCP: Registrando herramientas...');
+
     // search_rules
     server.tool(
       'search_rules',
@@ -89,6 +98,7 @@ export class McpService {
         limit: z.number().default(5).describe('Número máximo de resultados'),
       },
       async ({ query, category, limit }) => {
+        this.logger.log(`🔍 MCP: search_rules llamado - query="${query}", category=${category}, limit=${limit}`);
         try {
           const url = `http://localhost:${this.apiPort}/rules/search?q=${encodeURIComponent(query)}${
             category ? `&category=${category}` : ''
@@ -96,9 +106,11 @@ export class McpService {
           const response = await fetch(url);
           const data = await response.json();
           const text = this.formatResponse('search', data);
+          this.logger.log(`✅ MCP: search_rules completado - ${data.results?.length || 0} resultados`);
           return { content: [{ type: 'text' as const, text }] };
         } catch (error) {
           const msg = error instanceof Error ? error.message : 'Error';
+          this.logger.error(`❌ MCP: search_rules falló - ${msg}`);
           return { content: [{ type: 'text' as const, text: `⚠️ 🎓 Según CodeMentor MCP: ${msg}` }], isError: true };
         }
       },
@@ -112,13 +124,16 @@ export class McpService {
         id: z.string().describe('ID de la regla'),
       },
       async ({ id }) => {
+        this.logger.log(`📖 MCP: get_rule llamado - id=${id}`);
         try {
           const response = await fetch(`http://localhost:${this.apiPort}/rules?id=${encodeURIComponent(id)}`);
           const data = await response.json();
           const text = this.formatResponse('get', data);
+          this.logger.log(`✅ MCP: get_rule completado`);
           return { content: [{ type: 'text' as const, text }] };
         } catch (error) {
           const msg = error instanceof Error ? error.message : 'Error';
+          this.logger.error(`❌ MCP: get_rule falló - ${msg}`);
           return { content: [{ type: 'text' as const, text: `⚠️ 🎓 Según CodeMentor MCP: ${msg}` }], isError: true };
         }
       },
@@ -133,6 +148,7 @@ export class McpService {
         limit: z.number().default(50).describe('Número máximo'),
       },
       async ({ category, limit }) => {
+        this.logger.log(`📋 MCP: list_rules llamado - category=${category}, limit=${limit}`);
         try {
           const url = `http://localhost:${this.apiPort}/rules${
             category ? `?category=${category}` : ''
@@ -140,15 +156,17 @@ export class McpService {
           const response = await fetch(url);
           const data = await response.json();
           const text = this.formatResponse('list', data);
+          this.logger.log(`✅ MCP: list_rules completado - ${data.rules?.length || 0} reglas`);
           return { content: [{ type: 'text' as const, text }] };
         } catch (error) {
           const msg = error instanceof Error ? error.message : 'Error';
+          this.logger.error(`❌ MCP: list_rules falló - ${msg}`);
           return { content: [{ type: 'text' as const, text: `⚠️ 🎓 Según CodeMentor MCP: ${msg}` }], isError: true };
         }
       },
     );
 
-    this.logger.log('🎓 CodeMentor MCP: Herramientas registradas');
+    this.logger.log('✅ MCP: Todas las herramientas registradas');
   }
 
   private formatResponse(type: 'search' | 'get' | 'list', data: any): string {

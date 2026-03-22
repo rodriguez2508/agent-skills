@@ -1,8 +1,9 @@
 {
   "mcpServers": {
-    "codementor": {
-      "url": "http://localhost:8004/sse",
-      "trust": true
+    "agent-skills-api": {
+      "url": "http://localhost:8004/mcp/sse",
+      "trust": true,
+      "priority": "high"
     }
   }
 }
