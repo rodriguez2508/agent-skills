@@ -22,6 +22,13 @@ export class SessionRepository {
   ) {}
 
   /**
+   * Get TypeORM repository for direct operations (NUEVO!)
+   */
+  getRepository(): Repository<Session> {
+    return this.repository;
+  }
+
+  /**
    * Create a new session
    */
   async create(data: {
@@ -51,12 +58,6 @@ export class SessionRepository {
   async findBySessionId(sessionId: string): Promise<Session | null> {
     return this.repository.findOne({
       where: { sessionId },
-      relations: ['messages'],
-      order: {
-        messages: {
-          createdAt: 'ASC',
-        },
-      },
     });
   }
 
@@ -74,12 +75,6 @@ export class SessionRepository {
    * Get all messages for a session
    */
   async getMessages(sessionId: string, limit = 50): Promise<ChatMessage[]> {
-    const session = await this.findBySessionId(sessionId);
-    
-    if (!session) {
-      return [];
-    }
-
     return this.messageRepository.find({
       where: { sessionId },
       order: { createdAt: 'ASC' },
@@ -104,8 +99,7 @@ export class SessionRepository {
     }
 
     const message = this.messageRepository.create({
-      session,
-      sessionId: session.id,
+      sessionId: session.sessionId,
       role: data.role,
       content: data.content,
       metadata: data.metadata,
@@ -146,13 +140,13 @@ export class SessionRepository {
   }
 
   /**
-   * Get active sessions for a user
+   * Get active sessions (for reuse)
    */
-  async getActiveSessions(userId: string, limit = 10): Promise<Session[]> {
+  async getActiveSessions(userId?: string): Promise<Session[]> {
     return this.repository.find({
-      where: { userId, status: SessionStatus.ACTIVE },
-      order: { lastActivityAt: 'DESC' },
-      take: limit,
+      where: userId ? { userId, status: SessionStatus.ACTIVE } : { status: SessionStatus.ACTIVE },
+      order: { createdAt: 'DESC' },
+      take: 50,
     });
   }
 

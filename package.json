@@ -29,7 +29,8 @@
     "docker:restart": "docker-compose restart",
     "db:migrate": "typeorm-ts-node-commonjs migration:run -d src/infrastructure/database/typeorm/data-source.ts",
     "db:migrate:revert": "typeorm-ts-node-commonjs migration:revert -d src/infrastructure/database/typeorm/data-source.ts",
-    "db:generate": "typeorm-ts-node-commonjs migration:generate -d src/infrastructure/database/typeorm/data-source.ts"
+    "db:generate": "typeorm-ts-node-commonjs migration:generate -d src/infrastructure/database/typeorm/data-source.ts",
+    "test:db": "ts-node scripts/test-database.ts"
   },
   "dependencies": {
     "@grpc/grpc-js": "^1.12.5",

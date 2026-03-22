@@ -29,7 +29,7 @@ export class Session {
   @PrimaryGeneratedColumn('uuid')
   id: string;
 
-  @Column()
+  @Column({ type: 'varchar', name: 'session_id' })
   @Index()
   sessionId: string; // External session ID (from MCP client)
 
@@ -38,7 +38,7 @@ export class Session {
   @Index()
   user?: User;
 
-  @Column({ nullable: true })
+  @Column({ name: 'user_id', nullable: true })
   userId?: string;
 
   @Column({ default: SessionStatus.ACTIVE })
@@ -56,18 +56,15 @@ export class Session {
     [key: string]: any;
   };
 
-  @Column({ default: 0 })
+  @Column({ name: 'message_count', default: 0 })
   messageCount: number;
 
-  @Column({ nullable: true })
+  @Column({ name: 'last_activity_at', nullable: true })
   lastActivityAt?: Date;
 
-  @CreateDateColumn()
+  @CreateDateColumn({ name: 'created_at' })
   createdAt: Date;
 
-  @UpdateDateColumn()
+  @UpdateDateColumn({ name: 'updated_at' })
   updatedAt: Date;
-
-  @OneToMany(() => ChatMessage, (message) => message.session, { cascade: true })
-  messages: ChatMessage[];
 }

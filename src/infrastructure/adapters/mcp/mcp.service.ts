@@ -4,6 +4,9 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { SSEServerTransport } from '@modelcontextprotocol/sdk/server/sse.js';
 import { z } from 'zod';
 import { Response } from 'express';
+import { SessionRepository } from '@infrastructure/persistence/repositories/session.repository';
+import { RedisService } from '@infrastructure/database/redis/redis.service';
+import { MessageRole } from '@infrastructure/database/typeorm/entities/chat-message.entity';
 
 export interface McpSession {
   server: McpServer;
@@ -15,19 +18,77 @@ export class McpService {
   private readonly logger = new Logger(McpService.name);
   private readonly apiPort: number;
 
-  // Almacena sesiones activas por sessionId
+  // Stores active sessions by sessionId (MCP runtime)
   private sessions: Map<string, McpSession> = new Map();
 
-  constructor(private readonly configService: ConfigService) {
+  constructor(
+    private readonly configService: ConfigService,
+    private readonly sessionRepository: SessionRepository,
+    private readonly redisService: RedisService,
+  ) {
     this.apiPort = this.configService.get<number>('PORT', 8004);
   }
 
   /**
-   * Crea una nueva sesión MCP con su transporte
+   * Finds an active session by clientId
    */
-  async createSession(res: Response): Promise<{ sessionId: string; session: McpSession }> {
+  async findActiveSessionId(clientId: string): Promise<string | null> {
+    try {
+      // Try Redis first (faster)
+      const cachedSessionId = await this.redisService.get<string>(`client:${clientId}:sessionId`);
+      if (cachedSessionId) {
+        // Check if session exists in PostgreSQL
+        const session = await this.sessionRepository.findBySessionId(cachedSessionId);
+        if (session && session.status === 'active') {
+          this.logger.debug(`♻️ Session found in cache: ${cachedSessionId}`);
+          return cachedSessionId;
+        }
+      }
+
+      // Search in PostgreSQL
+      const sessions = await this.sessionRepository.getActiveSessions();
+      const matchingSession = sessions.find(s => 
+        s.metadata?.clientId === clientId || 
+        s.metadata?.clientIp === clientId.replace('ip-', '')
+      );
+
+      if (matchingSession) {
+        // Cache for next time
+        await this.redisService.set(`client:${clientId}:sessionId`, matchingSession.sessionId, 3600);
+        this.logger.debug(`♻️ Session found in DB: ${matchingSession.sessionId}`);
+        return matchingSession.sessionId;
+      }
+    } catch (error) {
+      this.logger.error(`Error finding session: ${error.message}`);
+    }
+
+    return null;
+  }
+
+  /**
+   * Updates lastActivityAt for a session
+   */
+  async touchSession(sessionId: string): Promise<void> {
+    try {
+      const session = await this.sessionRepository.findBySessionId(sessionId);
+      if (session) {
+        await this.sessionRepository.getRepository().update(
+          { id: session.id },
+          { lastActivityAt: new Date() },
+        );
+        this.logger.debug(`🕒 Session activity updated: ${sessionId}`);
+      }
+    } catch (error) {
+      this.logger.error(`Error updating activity: ${error.message}`);
+    }
+  }
+
+  /**
+   * Creates a new MCP session with its transport
+   */
+  async createSession(res: Response, clientId?: string): Promise<{ sessionId: string; session: McpSession }> {
     const transport = new SSEServerTransport('/mcp/message', res);
-    
+
     const server = new McpServer(
       {
         name: 'CodeMentor MCP',
@@ -42,17 +103,52 @@ export class McpService {
 
     this.registerTools(server);
 
-    // Conectar servidor al transporte
+    // Connect server to transport
     await server.connect(transport);
 
-    // El transporte genera su propio sessionId
+    // Transport generates its own sessionId
     const sessionId = transport.sessionId;
     const session: McpSession = { server, transport };
     this.sessions.set(sessionId, session);
-    
-    this.logger.log(`✅ MCP: Sesión creada: ${sessionId}`);
 
-    // Limpiar cuando se cierre la conexión
+    // SAVE TO POSTGRESQL
+    try {
+      const createdSession = await this.sessionRepository.create({
+        sessionId,
+        title: 'MCP Session',
+        metadata: {
+          type: 'mcp',
+          clientId,
+          clientIp: res.req?.ip,
+          createdAt: new Date().toISOString(),
+        },
+      });
+      
+      // Store clientId -> sessionId in Redis for fast lookups
+      if (clientId) {
+        await this.redisService.set(`client:${clientId}:sessionId`, sessionId, 86400);
+      }
+      
+      this.logger.debug(`💾 Session saved to PostgreSQL: ${sessionId} (clientId: ${clientId})`);
+    } catch (error) {
+      this.logger.error(`Error saving session to DB: ${error.message}`);
+    }
+
+    // SAVE TO REDIS
+    try {
+      await this.redisService.setSession(sessionId, {
+        type: 'mcp',
+        clientId,
+        createdAt: Date.now(),
+      }, 86400);
+      this.logger.debug(`💾 Session saved to Redis: ${sessionId}`);
+    } catch (error) {
+      this.logger.error(`Error saving session to Redis: ${error.message}`);
+    }
+
+    this.logger.log(`✅ MCP: Session created: ${sessionId}`);
+
+    // Cleanup when connection closes
     res.on('close', () => {
       this.closeSession(sessionId);
     });
@@ -61,44 +157,62 @@ export class McpService {
   }
 
   /**
-   * Cierra y elimina una sesión
+   * Closes and removes a session
    */
   closeSession(sessionId: string): void {
     const session = this.sessions.get(sessionId);
     if (session) {
       this.sessions.delete(sessionId);
-      this.logger.log(`🗑️ MCP: Sesión cerrada: ${sessionId}`);
+      this.logger.log(`🗑️ MCP: Session closed: ${sessionId}`);
     }
   }
 
   /**
-   * Obtiene una sesión por ID
+   * Gets a session by ID
    */
   getSession(sessionId: string): McpSession | undefined {
     return this.sessions.get(sessionId);
   }
 
   /**
-   * Obtiene todas las sesiones (para debug)
+   * Gets all sessions (for debug)
    */
   getSessions(): Map<string, McpSession> {
     return this.sessions;
   }
 
+  /**
+   * Saves a chat message to PostgreSQL
+   */
+  async saveChatMessage(sessionId: string, role: MessageRole, content: string, metadata?: any): Promise<void> {
+    try {
+      await this.sessionRepository.addMessage({
+        sessionId,
+        role,
+        content,
+        metadata,
+        tokenCount: content.length,
+      });
+      this.logger.debug(`💬 Message saved to PostgreSQL: ${sessionId} - ${role}`);
+    } catch (error) {
+      this.logger.error(`Error saving message to DB: ${error.message}`);
+    }
+  }
+
   private registerTools(server: McpServer) {
-    this.logger.log('🔧 MCP: Registrando herramientas...');
+    this.logger.log('🔧 MCP: Registering tools...');
 
     // search_rules
     server.tool(
       'search_rules',
-      'Busca reglas de código usando BM25. Devuelve reglas con el prefijo "🎓 Según CodeMentor MCP"',
+      'Searches code rules using BM25. Returns rules with prefix "🎓 According to CodeMentor MCP"',
       {
-        query: z.string().describe('Término de búsqueda'),
-        category: z.string().optional().describe('Categoría (nestjs, angular, typescript)'),
-        limit: z.number().default(5).describe('Número máximo de resultados'),
+        query: z.string().describe('Search term'),
+        category: z.string().optional().describe('Category (nestjs, angular, typescript)'),
+        limit: z.number().default(5).describe('Maximum number of results'),
       },
       async ({ query, category, limit }) => {
-        this.logger.log(`🔍 MCP: search_rules llamado - query="${query}", category=${category}, limit=${limit}`);
+        this.logger.log(`🔍 MCP: search_rules called - query="${query}", category=${category}, limit=${limit}`);
         try {
           const url = `http://localhost:${this.apiPort}/rules/search?q=${encodeURIComponent(query)}${
             category ? `&category=${category}` : ''
@@ -106,12 +220,12 @@ export class McpService {
           const response = await fetch(url);
           const data = await response.json();
           const text = this.formatResponse('search', data);
-          this.logger.log(`✅ MCP: search_rules completado - ${data.results?.length || 0} resultados`);
+          this.logger.log(`✅ MCP: search_rules completed - ${data.results?.length || 0} results`);
           return { content: [{ type: 'text' as const, text }] };
         } catch (error) {
           const msg = error instanceof Error ? error.message : 'Error';
-          this.logger.error(`❌ MCP: search_rules falló - ${msg}`);
-          return { content: [{ type: 'text' as const, text: `⚠️ 🎓 Según CodeMentor MCP: ${msg}` }], isError: true };
+          this.logger.error(`❌ MCP: search_rules failed - ${msg}`);
+          return { content: [{ type: 'text' as const, text: `⚠️ 🎓 According to CodeMentor MCP: ${msg}` }], isError: true };
         }
       },
     );
@@ -119,22 +233,22 @@ export class McpService {
     // get_rule
     server.tool(
       'get_rule',
-      'Obtiene regla por ID. Devuelve con prefijo "🎓 Según CodeMentor MCP"',
+      'Gets a rule by ID. Returns with prefix "🎓 According to CodeMentor MCP"',
       {
-        id: z.string().describe('ID de la regla'),
+        id: z.string().describe('Rule ID'),
       },
       async ({ id }) => {
-        this.logger.log(`📖 MCP: get_rule llamado - id=${id}`);
+        this.logger.log(`📖 MCP: get_rule called - id=${id}`);
         try {
           const response = await fetch(`http://localhost:${this.apiPort}/rules?id=${encodeURIComponent(id)}`);
           const data = await response.json();
           const text = this.formatResponse('get', data);
-          this.logger.log(`✅ MCP: get_rule completado`);
+          this.logger.log(`✅ MCP: get_rule completed`);
           return { content: [{ type: 'text' as const, text }] };
         } catch (error) {
           const msg = error instanceof Error ? error.message : 'Error';
-          this.logger.error(`❌ MCP: get_rule falló - ${msg}`);
-          return { content: [{ type: 'text' as const, text: `⚠️ 🎓 Según CodeMentor MCP: ${msg}` }], isError: true };
+          this.logger.error(`❌ MCP: get_rule failed - ${msg}`);
+          return { content: [{ type: 'text' as const, text: `⚠️ 🎓 According to CodeMentor MCP: ${msg}` }], isError: true };
         }
       },
     );

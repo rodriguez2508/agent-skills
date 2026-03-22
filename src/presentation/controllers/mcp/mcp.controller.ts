@@ -5,6 +5,8 @@ import { McpService } from '@infrastructure/adapters/mcp/mcp.service';
 import { RouterAgent } from '@agents/router/router.agent';
 import { IdentityAgent } from '@agents/identity/identity.agent';
 import { AgentLoggerService } from '@infrastructure/logging/agent-logger.service';
+import { MessageRole } from '@infrastructure/database/typeorm/entities/chat-message.entity';
+import { SSEServerTransport } from '@modelcontextprotocol/sdk/server/sse.js';
 
 @ApiTags('MCP')
 @Controller('mcp')
@@ -21,22 +23,40 @@ export class McpController {
   @Get('sse')
   @ApiOperation({ summary: 'MCP SSE endpoint for Qwen communication' })
   async sse(@Res() res: Response, @Req() req: Request) {
-    this.logger.log(`🔌 MCP: Nuevo cliente SSE conectado`);
+    // Get unique client identifier (Qwen sends clientId or we use IP)
+    const clientId = req.query.clientId as string ||
+                     req.headers['x-client-id'] as string ||
+                     `ip-${req.ip || 'unknown'}`;
 
-    // Configurar headers para SSE
+    this.logger.log(`🔌 MCP: New SSE client connected (clientId: ${clientId})`);
+
+    // Configure headers for SSE
     res.setHeader('Content-Type', 'text/event-stream');
     res.setHeader('Cache-Control', 'no-cache');
     res.setHeader('Connection', 'keep-alive');
     res.setHeader('X-Accel-Buffering', 'no');
 
-    // Crear sesión MCP (el transporte genera su propio sessionId)
-    const { sessionId } = await this.mcpService.createSession(res);
+    // CHECK IF SESSION ALREADY EXISTS FOR THIS CLIENT
+    const existingSessionId = await this.mcpService.findActiveSessionId(clientId);
 
-    this.logger.log(`✅ MCP: Sesión creada: ${sessionId}`);
+    if (existingSessionId) {
+      this.logger.log(`♻️ MCP: Session already exists: ${existingSessionId} - DO NOT reconnect`);
+      // ONLY UPDATE ACTIVITY, DO NOT RECREATE SESSION
+      await this.mcpService.touchSession(existingSessionId);
 
-    // Manejar errores
+      // Qwen will keep the existing SSE connection
+      // Just let the original transport handle messages
+      return;
+    }
+
+    // Create new MCP session only if it doesn't exist
+    const { sessionId } = await this.mcpService.createSession(res, clientId);
+
+    this.logger.log(`✅ MCP: Session CREATED: ${sessionId} (clientId: ${clientId})`);
+
+    // Handle errors
     res.on('error', (error) => {
-      this.logger.error(`❌ MCP: Error en SSE: ${error.message}`, error.stack);
+      this.logger.error(`❌ MCP: SSE error: ${error.message}`, error.stack);
     });
   }
 
@@ -95,12 +115,13 @@ export class McpController {
       properties: {
         input: { type: 'string', description: 'User message' },
         options: { type: 'object', description: 'Additional options' },
+        sessionId: { type: 'string', description: 'Session ID (optional)' },
       },
       required: ['input'],
     },
   })
-  async chat(@Body() body: { input: string; options?: Record<string, any> }) {
-    const { input, options } = body;
+  async chat(@Body() body: { input: string; options?: Record<string, any>; sessionId?: string }) {
+    const { input, options, sessionId } = body;
 
     if (!input || input.trim().length === 0) {
       return {
@@ -110,17 +131,28 @@ export class McpController {
       };
     }
 
-    this.logger.log(`💬 MCP Chat: Usuario dice "${input.substring(0, 50)}..."`);
+    this.logger.log(`💬 MCP Chat: User says "${input.substring(0, 50)}..."`);
 
-    // Log de inicio
-    this.agentLogger.info('MCP-Controller', '📥 Mensaje recibido del usuario', {
+    // SAVE USER MESSAGE TO POSTGRESQL
+    if (sessionId) {
+      await this.mcpService.saveChatMessage(
+        sessionId,
+        MessageRole.USER,
+        input,
+        { options },
+      ).catch(err => this.logger.warn(`Error saving message: ${err.message}`));
+    }
+
+    // Log start
+    this.agentLogger.info('MCP-Controller', '📥 User message received', {
       input: input.substring(0, 100),
       options,
+      sessionId,
     });
 
     try {
-      // Activar RouterAgent que enrutará al agente especializado
-      this.agentLogger.info('RouterAgent', '🔄 Activando RouterAgent para procesar solicitud', {
+      // Activate RouterAgent to route to specialized agent
+      this.agentLogger.info('RouterAgent', '🔄 Activating RouterAgent to process request', {
         inputLength: input.length,
       });
 
@@ -129,8 +161,21 @@ export class McpController {
         options: options || {},
       });
 
-      // Log de respuesta
-      this.agentLogger.info('MCP-Controller', '✅ Respuesta generada', {
+      // SAVE RESPONSE TO POSTGRESQL
+      if (sessionId && response.data?.message) {
+        await this.mcpService.saveChatMessage(
+          sessionId,
+          MessageRole.ASSISTANT,
+          response.data.message,
+          {
+            agentId: response.data?.metadata?.agentId,
+            executionTime: response.metadata?.executionTime,
+          },
+        ).catch(err => this.logger.warn(`Error saving response: ${err.message}`));
+      }
+
+      // Log response
+      this.agentLogger.info('MCP-Controller', '✅ Response generated', {
         success: response.success,
         executionTime: response.metadata?.executionTime,
       });
@@ -144,9 +189,19 @@ export class McpController {
       };
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-      this.agentLogger.error('MCP-Controller', `❌ Error en chat: ${errorMessage}`, {
+      this.agentLogger.error('MCP-Controller', `❌ Chat error: ${errorMessage}`, {
         error,
       });
+
+      // SAVE ERROR TO POSTGRESQL
+      if (sessionId) {
+        await this.mcpService.saveChatMessage(
+          sessionId,
+          MessageRole.ASSISTANT,
+          `Error: ${errorMessage}`,
+          { isError: true },
+        ).catch(err => this.logger.warn(`Error saving error: ${err.message}`));
+      }
 
       return {
         success: false,

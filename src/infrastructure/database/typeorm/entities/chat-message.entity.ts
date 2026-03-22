@@ -27,12 +27,8 @@ export class ChatMessage {
   @PrimaryGeneratedColumn('uuid')
   id: string;
 
-  @ManyToOne(() => Session, (session) => session.messages, { onDelete: 'CASCADE' })
-  @JoinColumn({ name: 'session_id' })
+  @Column({ type: 'varchar', name: 'session_id' })
   @Index()
-  session: Session;
-
-  @Column()
   sessionId: string;
 
   @Column({
@@ -57,13 +53,13 @@ export class ChatMessage {
     [key: string]: any;
   };
 
-  @Column({ nullable: true })
+  @Column({ name: 'parent_message_id', nullable: true })
   @Index()
   parentMessageId?: string;
 
-  @Column({ default: 0 })
+  @Column({ name: 'token_count', default: 0 })
   tokenCount: number;
 
-  @CreateDateColumn()
+  @CreateDateColumn({ name: 'created_at' })
   createdAt: Date;
 }
