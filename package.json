@@ -6,7 +6,8 @@
   "private": true,
   "license": "UNLICENSED",
   "scripts": {
-    "build": "nest build",
+    "typecheck": "tsc --noEmit",
+    "build": "pnpm run typecheck && nest build",
     "build:mcp": "tsc src/mcp-server.ts --outDir dist --module commonjs --target ES2023 --moduleResolution node --esModuleInterop --skipLibCheck",
     "build:mcp-http": "tsc src/mcp-http-server.ts --outDir dist --module commonjs --target ES2023 --moduleResolution node --esModuleInterop --skipLibCheck",
     "format": "prettier --write \"src/**/*.ts\" \"test/**/*.ts\"",
