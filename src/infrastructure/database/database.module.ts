@@ -1,6 +1,6 @@
 /**
  * Database Module (PostgreSQL + Redis)
- * 
+ *
  * Provides database connections and repositories.
  */
 
@@ -9,17 +9,9 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { createTypeORMConfig } from './typeorm/typeorm.config';
 
-// Entities
-import { User } from './typeorm/entities/user.entity';
-import { Session } from './typeorm/entities/session.entity';
-import { ChatMessage } from './typeorm/entities/chat-message.entity';
-
 // Redis
 import { RedisModule } from './redis/redis.module';
 import { RedisService } from './redis/redis.service';
-
-// Repositories
-import { SessionRepository } from '../persistence/repositories/session.repository';
 
 @Module({
   imports: [
@@ -28,10 +20,9 @@ import { SessionRepository } from '../persistence/repositories/session.repositor
       inject: [ConfigService],
       useFactory: createTypeORMConfig,
     }),
-    TypeOrmModule.forFeature([User, Session, ChatMessage]),
     RedisModule.forRoot(),
   ],
-  providers: [SessionRepository, RedisService],
-  exports: [TypeOrmModule, RedisModule, SessionRepository, RedisService],
+  providers: [RedisService],
+  exports: [TypeOrmModule, RedisModule, RedisService],
 })
 export class DatabaseModule {}

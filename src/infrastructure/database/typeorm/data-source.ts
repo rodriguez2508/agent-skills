@@ -12,6 +12,7 @@
 import { DataSource, DataSourceOptions } from 'typeorm';
 import { ConfigService } from '@nestjs/config';
 import * as dotenv from 'dotenv';
+import * as path from 'path';
 
 // Load environment variables
 dotenv.config();
@@ -25,8 +26,11 @@ export const dataSourceOptions: DataSourceOptions = {
   username: process.env.DB_USERNAME || 'postgres',
   password: process.env.DB_PASSWORD || 'postgres',
   database: process.env.DB_DATABASE || 'agent_skills',
-  entities: [__dirname + '/entities/*.entity{.ts,.js}'],
-  migrations: [__dirname + '/migrations/*{.ts,.js}'],
+  entities: [
+    path.join(__dirname, '../../../modules/users/domain/entities/*.entity{.ts,.js}'),
+    path.join(__dirname, '../../../modules/sessions/domain/entities/*.entity{.ts,.js}'),
+  ],
+  migrations: [path.join(__dirname, '/migrations/*{.ts,.js}')],
   synchronize: false, // Never use synchronize with migrations
   logging: process.env.DB_LOGGING === 'true',
   ssl: process.env.DB_SSL === 'true' ? { rejectUnauthorized: false } : false,

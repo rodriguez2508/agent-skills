@@ -22,9 +22,18 @@
       "@application/*": ["src/application/*"],
       "@infrastructure/*": ["src/infrastructure/*"],
       "@presentation/*": ["src/presentation/*"],
-      "@agents/*": ["src/agents/*"]
+      "@agents/*": ["src/agents/*"],
+      "@modules/*": ["src/modules/*"],
+      "@shared/*": ["src/shared/*"]
     }
   },
+  "include": ["src/**/*", "scripts/**/*"],
+  "exclude": [
+    "node_modules",
+    "dist",
+    "src/infrastructure/database/typeorm/entities",
+    "src/infrastructure/persistence/repositories/session.repository.ts"
+  ],
   "ts-node": {
     "require": ["tsconfig-paths/register"]
   }

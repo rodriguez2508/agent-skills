@@ -1,11 +1,12 @@
 /**
  * TypeORM Configuration
- * 
+ *
  * PostgreSQL configuration for TypeORM.
  */
 
 import { TypeOrmModuleOptions } from '@nestjs/typeorm';
 import { ConfigService } from '@nestjs/config';
+import * as path from 'path';
 
 export const createTypeORMConfig = (
   configService: ConfigService,
@@ -21,24 +22,27 @@ export const createTypeORMConfig = (
     username: configService.get<string>('DB_USERNAME', 'postgres'),
     password: configService.get<string>('DB_PASSWORD', 'postgres'),
     database: configService.get<string>('DB_DATABASE', 'agent_skills'),
-    
-    // Auto-load entities from dist (compiled)
-    entities: [__dirname + '/entities/*.entity{.ts,.js}'],
-    
+
+    // Auto-load entities from modules (compiled)
+    entities: [
+      path.join(__dirname, '../../../modules/users/domain/entities/*.entity{.ts,.js}'),
+      path.join(__dirname, '../../../modules/sessions/domain/entities/*.entity{.ts,.js}'),
+    ],
+
     // Migrations for schema changes
-    migrations: [__dirname + '/migrations/*{.ts,.js}'],
+    migrations: [path.join(__dirname, '/migrations/*{.ts,.js}')],
     migrationsTableName: 'migrations',
-    
+
     // Synchronize in development only
     synchronize: isSynchronize,
-    
+
     // Logging
     logging: isLogging,
     logger: 'advanced-console',
-    
+
     // SSL for production
     ssl: isSsl ? { rejectUnauthorized: false } : false,
-    
+
     // Connection pool
     extra: {
       max: 20,

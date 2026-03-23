@@ -1,8 +1,8 @@
 /**
  * User Entity
- * 
+ *
  * Represents a user in the system.
- * Used for authentication, preferences, and analytics.
+ * Users are grouped by IP address.
  */
 
 import {
@@ -14,7 +14,7 @@ import {
   OneToMany,
   Index,
 } from 'typeorm';
-import { Session } from './session.entity';
+import { Session } from '@modules/sessions/domain/entities/session.entity';
 
 @Entity('users')
 export class User {
@@ -43,18 +43,24 @@ export class User {
   };
 
   @Column({ default: 0 })
-  @Index()
   totalSessions: number;
 
   @Column({ default: 0 })
   totalSearches: number;
 
-  @CreateDateColumn()
+  @Column({ nullable: true })
+  @Index()
+  lastIpAddress?: string;
+
+  @Column('jsonb', { nullable: true })
+  ipAddressHistory?: string[];
+
+  @CreateDateColumn({ name: 'created_at' })
   createdAt: Date;
 
-  @UpdateDateColumn()
+  @UpdateDateColumn({ name: 'updated_at' })
   updatedAt: Date;
 
   @OneToMany(() => Session, (session) => session.user, { cascade: true })
-  sessions: Session[];
+  sessions?: Session[];
 }

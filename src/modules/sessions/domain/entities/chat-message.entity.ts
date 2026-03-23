@@ -1,8 +1,7 @@
 /**
  * ChatMessage Entity
- * 
- * Represents a single message in a chat session.
- * Can be from user (role: user) or assistant (role: assistant).
+ *
+ * Represents a message in a chat session.
  */
 
 import {
@@ -27,33 +26,25 @@ export class ChatMessage {
   @PrimaryGeneratedColumn('uuid')
   id: string;
 
-  @Column({ type: 'varchar', name: 'session_id' })
+  @Column({ name: 'session_id', type: 'varchar' })
   @Index()
   sessionId: string;
 
-  @Column({
-    type: 'enum',
-    enum: MessageRole,
-    default: MessageRole.USER,
-  })
+  @ManyToOne(() => Session, (session) => session.messages, { onDelete: 'CASCADE' })
+  @JoinColumn({ name: 'session_id', referencedColumnName: 'sessionId' })
+  session?: Session;
+
+  @Column({ type: 'enum', enum: MessageRole, default: MessageRole.USER })
   @Index()
   role: MessageRole;
 
-  @Column('text')
+  @Column({ type: 'text' })
   content: string;
 
   @Column('jsonb', { nullable: true })
-  metadata?: {
-    agentId?: string;
-    toolsUsed?: string[];
-    rulesApplied?: string[];
-    searchQuery?: string;
-    searchResults?: number;
-    executionTime?: number;
-    [key: string]: any;
-  };
+  metadata?: any;
 
-  @Column({ name: 'parent_message_id', nullable: true })
+  @Column({ name: 'parent_message_id', type: 'uuid', nullable: true })
   @Index()
   parentMessageId?: string;
 

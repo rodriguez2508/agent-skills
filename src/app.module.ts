@@ -1,6 +1,7 @@
 import { Module, OnModuleInit } from '@nestjs/common';
 import { CqrsModule } from '@nestjs/cqrs';
 import { ConfigModule } from '@nestjs/config';
+import { ScheduleModule } from '@nestjs/schedule';
 
 // Infrastructure
 import { BM25Engine } from '@infrastructure/search/bm25/bm25.engine';
@@ -36,6 +37,15 @@ import { MetricsAgent } from '@agents/metrics/metrics.agent';
 // Domain
 import { RULE_REPOSITORY } from '@core/domain/ports/rule-repository.token';
 
+// New Modular Structure
+import { AuthModule } from '@modules/auth/auth.module';
+import { UsersModule } from '@modules/users/users.module';
+import { SessionsModule } from '@modules/sessions/sessions.module';
+import { AuthController } from '@modules/auth/presentation/controllers/auth.controller';
+
+// Middleware
+import { IpTrackerMiddleware } from '@shared/middleware/ip-tracker.middleware';
+
 @Module({
   imports: [
     ConfigModule.forRoot({
@@ -43,13 +53,19 @@ import { RULE_REPOSITORY } from '@core/domain/ports/rule-repository.token';
       envFilePath: '.env',
     }),
     CqrsModule,
+    ScheduleModule.forRoot(),
     DatabaseModule,
     VectorStorageModule.forRoot({
       type: 'inmemory', // Default for development, change to 'chromadb' for production
       global: true,
     }),
+
+    // New Modular Structure
+    AuthModule,
+    UsersModule,
+    SessionsModule,
   ],
-  controllers: [HealthController, RulesController, McpController],
+  controllers: [HealthController, RulesController, McpController, AuthController],
   providers: [
     // Infrastructure
     BM25Engine,
@@ -79,6 +95,9 @@ import { RULE_REPOSITORY } from '@core/domain/ports/rule-repository.token';
     SearchRulesHandler,
     GetRuleHandler,
     ListRulesHandler,
+
+    // Middleware
+    IpTrackerMiddleware,
   ],
 })
 export class AppModule implements OnModuleInit {

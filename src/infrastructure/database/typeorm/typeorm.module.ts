@@ -1,6 +1,6 @@
 /**
  * TypeORM Module
- * 
+ *
  * Provides TypeORM database connection with PostgreSQL.
  */
 
@@ -9,10 +9,11 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { createTypeORMConfig } from './typeorm.config';
 
-// Entities
-import { User } from './entities/user.entity';
-import { Session } from './entities/session.entity';
-import { ChatMessage } from './entities/chat-message.entity';
+// Entities - from domain modules
+import { User } from '@modules/users/domain/entities/user.entity';
+import { Session } from '@modules/sessions/domain/entities/session.entity';
+import { ChatMessage } from '@modules/sessions/domain/entities/chat-message.entity';
+import { SessionPurpose } from '@modules/sessions/domain/entities/session-purpose.entity';
 
 @Module({
   imports: [
@@ -21,7 +22,7 @@ import { ChatMessage } from './entities/chat-message.entity';
       inject: [ConfigService],
       useFactory: createTypeORMConfig,
     }),
-    TypeOrmModule.forFeature([User, Session, ChatMessage]),
+    TypeOrmModule.forFeature([User, Session, ChatMessage, SessionPurpose]),
   ],
   exports: [TypeOrmModule],
 })

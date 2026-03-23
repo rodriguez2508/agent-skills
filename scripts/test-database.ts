@@ -1,17 +1,17 @@
 /**
  * Database Integration Test Script
- * 
+ *
  * Tests PostgreSQL and Redis integration.
- * 
+ *
  * Usage:
  *   pnpm ts-node scripts/test-database.ts
  */
 
 import { NestFactory } from '@nestjs/core';
 import { AppModule } from '../src/app.module';
-import { SessionRepository } from '../src/infrastructure/persistence/repositories/session.repository';
+import { SessionRepository } from '../src/modules/sessions/infrastructure/persistence/session.repository';
 import { RedisService } from '../src/infrastructure/database/redis/redis.service';
-import { MessageRole } from '../src/infrastructure/database/typeorm/entities/chat-message.entity';
+import { MessageRole } from '../src/modules/sessions/domain/entities/chat-message.entity';
 
 async function bootstrap() {
   console.log('🧪 Starting Database Integration Tests...\n');

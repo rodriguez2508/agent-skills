@@ -36,11 +36,25 @@ export class RuleFileRepository implements RuleRepository {
   async findAll(): Promise<Rule[]> {
     this.invalidateCache();
     const rules: Rule[] = [];
-    const categories = await this.getCategories();
-
-    for (const category of categories) {
-      const categoryRules = await this.findByCategory(category);
-      rules.push(...categoryRules);
+    
+    // Check if we have subdirectories (category-based) or flat structure
+    const hasSubdirs = await this.hasCategorySubdirectories();
+    
+    if (hasSubdirs) {
+      const categories = await this.getCategories();
+      for (const category of categories) {
+        const categoryRules = await this.findByCategory(category);
+        rules.push(...categoryRules);
+      }
+    } else {
+      // Flat structure - read all .md files from rulesPath
+      const files = fs.readdirSync(this.rulesPath).filter((file) => file.endsWith('.md') && !file.startsWith('_'));
+      for (const file of files) {
+        const rule = await this.loadRuleFromFlatFile(file);
+        if (rule) {
+          rules.push(rule);
+        }
+      }
     }
 
     return rules;
@@ -48,19 +62,32 @@ export class RuleFileRepository implements RuleRepository {
 
   async findByCategory(category: string): Promise<Rule[]> {
     this.invalidateCache();
-    const categoryPath = path.join(this.rulesPath, category.toLowerCase());
     const rules: Rule[] = [];
+    
+    // Check if we have subdirectories (category-based) or flat structure
+    const hasSubdirs = await this.hasCategorySubdirectories();
+    
+    if (hasSubdirs) {
+      const categoryPath = path.join(this.rulesPath, category.toLowerCase());
+      if (!fs.existsSync(categoryPath)) {
+        return rules;
+      }
 
-    if (!fs.existsSync(categoryPath)) {
-      return rules;
-    }
-
-    const files = fs.readdirSync(categoryPath).filter((file) => file.endsWith('.md'));
-
-    for (const file of files) {
-      const rule = await this.loadRuleFromFileFile(category, file);
-      if (rule) {
-        rules.push(rule);
+      const files = fs.readdirSync(categoryPath).filter((file) => file.endsWith('.md'));
+      for (const file of files) {
+        const rule = await this.loadRuleFromFileFile(category, file);
+        if (rule) {
+          rules.push(rule);
+        }
+      }
+    } else {
+      // Flat structure - filter by category extracted from filename or content
+      const files = fs.readdirSync(this.rulesPath).filter((file) => file.endsWith('.md') && !file.startsWith('_'));
+      for (const file of files) {
+        const rule = await this.loadRuleFromFlatFile(file);
+        if (rule && rule.category.toLowerCase() === category.toLowerCase()) {
+          rules.push(rule);
+        }
       }
     }
 
@@ -97,11 +124,17 @@ export class RuleFileRepository implements RuleRepository {
   }
 
   private async loadRuleFromFile(id: string): Promise<Rule | null> {
+    // First try category-based structure
     for (const category of await this.getCategories()) {
       const filePath = path.join(this.rulesPath, category, `${id}.md`);
       if (fs.existsSync(filePath)) {
         return this.parseRuleFile(filePath, category, id);
       }
+    }
+    // Try flat structure
+    const filePath = path.join(this.rulesPath, `${id}.md`);
+    if (fs.existsSync(filePath)) {
+      return this.loadRuleFromFlatFile(path.basename(filePath));
     }
     return null;
   }
@@ -113,6 +146,68 @@ export class RuleFileRepository implements RuleRepository {
     const filePath = path.join(this.rulesPath, category, file);
     const id = path.basename(file, '.md');
     return this.parseRuleFile(filePath, category, id);
+  }
+
+  private async loadRuleFromFlatFile(file: string): Promise<Rule | null> {
+    const filePath = path.join(this.rulesPath, file);
+    const id = path.basename(file, '.md');
+    
+    try {
+      const content = fs.readFileSync(filePath, 'utf-8');
+      const name = this.extractTitle(content);
+      const body = content.replace(/^# .+\n+/, '').trim();
+      const tags = this.extractTags(body);
+      const category = this.extractCategoryFromFilename(id);
+
+      return new Rule({
+        id,
+        name,
+        content: body,
+        category,
+        tags,
+        impact: RuleImpact.MEDIUM,
+      });
+    } catch {
+      return null;
+    }
+  }
+
+  private extractCategoryFromFilename(filename: string): string {
+    // Extract category from filename prefix (e.g., "api-use-dto" -> "api")
+    const prefix = filename.split('-')[0];
+    
+    const categoryMap: Record<string, string> = {
+      'api': 'api',
+      'arch': 'architecture',
+      'clean': 'clean-architecture',
+      'cqrs': 'cqrs',
+      'db': 'database',
+      'dependency': 'dependency-injection',
+      'dev': 'development',
+      'di': 'dependency-injection',
+      'error': 'error-handling',
+      'git': 'git',
+      'hex': 'hexagonal',
+      'micro': 'microservices',
+      'perf': 'performance',
+      'qwen': 'qwen',
+      'security': 'security',
+      'test': 'testing',
+      'type': 'typescript',
+    };
+
+    return categoryMap[prefix] || 'general';
+  }
+
+  private hasCategorySubdirectories(): boolean {
+    if (!fs.existsSync(this.rulesPath)) {
+      return false;
+    }
+    const items = fs.readdirSync(this.rulesPath);
+    return items.some((item) => {
+      const itemPath = path.join(this.rulesPath, item);
+      return fs.statSync(itemPath).isDirectory();
+    });
   }
 
   private parseRuleFile(

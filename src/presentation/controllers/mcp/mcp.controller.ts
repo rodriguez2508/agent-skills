@@ -5,7 +5,7 @@ import { McpService } from '@infrastructure/adapters/mcp/mcp.service';
 import { RouterAgent } from '@agents/router/router.agent';
 import { IdentityAgent } from '@agents/identity/identity.agent';
 import { AgentLoggerService } from '@infrastructure/logging/agent-logger.service';
-import { MessageRole } from '@infrastructure/database/typeorm/entities/chat-message.entity';
+import { MessageRole } from '@modules/sessions/domain/entities/chat-message.entity';
 import { SSEServerTransport } from '@modelcontextprotocol/sdk/server/sse.js';
 
 @ApiTags('MCP')
@@ -24,9 +24,10 @@ export class McpController {
   @ApiOperation({ summary: 'MCP SSE endpoint for Qwen communication' })
   async sse(@Res() res: Response, @Req() req: Request) {
     // Get unique client identifier (Qwen sends clientId or we use IP)
+    // Each Qwen instance should have a unique clientId (timestamp-based)
     const clientId = req.query.clientId as string ||
                      req.headers['x-client-id'] as string ||
-                     `ip-${req.ip || 'unknown'}`;
+                     `ip-${req.ip || 'unknown'}-${Date.now()}`;
 
     this.logger.log(`🔌 MCP: New SSE client connected (clientId: ${clientId})`);
 
@@ -36,20 +37,9 @@ export class McpController {
     res.setHeader('Connection', 'keep-alive');
     res.setHeader('X-Accel-Buffering', 'no');
 
-    // CHECK IF SESSION ALREADY EXISTS FOR THIS CLIENT
-    const existingSessionId = await this.mcpService.findActiveSessionId(clientId);
-
-    if (existingSessionId) {
-      this.logger.log(`♻️ MCP: Session already exists: ${existingSessionId} - DO NOT reconnect`);
-      // ONLY UPDATE ACTIVITY, DO NOT RECREATE SESSION
-      await this.mcpService.touchSession(existingSessionId);
-
-      // Qwen will keep the existing SSE connection
-      // Just let the original transport handle messages
-      return;
-    }
-
-    // Create new MCP session only if it doesn't exist
+    // ALWAYS create a new SSE transport for each connection
+    // Multiple Qwen instances can connect simultaneously
+    // They will share the same userId (by IP) but have different sessionIds
     const { sessionId } = await this.mcpService.createSession(res, clientId);
 
     this.logger.log(`✅ MCP: Session CREATED: ${sessionId} (clientId: ${clientId})`);

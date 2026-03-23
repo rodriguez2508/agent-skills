@@ -147,28 +147,59 @@ export class RulesEngine implements OnModuleInit {
    */
   private parseRuleFile(filename: string, content: string): Rule | null {
     try {
-      // Extraer metadata del frontmatter
-      const frontmatterMatch = content.match(/^---\n([\s\S]*?)\n---/);
-      if (!frontmatterMatch) {
-        return null;
-      }
+      let ruleContent = content;
+      let title: string | undefined;
+      let impact: string = 'MEDIUM';
+      let impactDescription: string | undefined;
+      let tags: string[] = [];
 
-      const frontmatter = frontmatterMatch[1];
-      const titleMatch = frontmatter.match(/title:\s*(.+)/);
-      const impactMatch = frontmatter.match(/impact:\s*(.+)/);
-      const impactDescMatch = frontmatter.match(/impactDescription:\s*["']?(.+?)["']?/);
-      const tagsMatch = frontmatter.match(/tags:\s*(.+)/);
+      // Try to extract metadata from frontmatter first
+      const frontmatterMatch = content.match(/^---\n([\s\S]*?)\n---/);
+      if (frontmatterMatch && frontmatterMatch[1].trim()) {
+        const frontmatter = frontmatterMatch[1];
+        title = frontmatter.match(/title:\s*(.+)/)?.[1]?.trim();
+        impact = frontmatter.match(/impact:\s*(.+)/)?.[1]?.trim() || 'MEDIUM';
+        impactDescription = frontmatter.match(/impactDescription:\s*["']?(.+?)["']?/)?.[1]?.trim();
+        tags = frontmatter.match(/tags:\s*(.+)/)?.[1]?.split(',').map((t: string) => t.trim()) || [];
+        ruleContent = content.replace(frontmatterMatch[0], '').trim();
+      } else {
+        // No frontmatter or empty frontmatter - extract from content
+        // Remove frontmatter separators if present
+        ruleContent = content.replace(/^---\n[\s\S]*?\n---\n?/, '').trim();
+        
+        // Extract title from first line (remove "# Rule:" or "#" prefix)
+        const firstLineMatch = ruleContent.match(/^#(?: Rule:)?\s*(.+)/m);
+        if (firstLineMatch) {
+          title = firstLineMatch[1].trim();
+        }
+
+        // Extract metadata from bold markers like **Category:** nestjs
+        const categoryMatch = ruleContent.match(/\*\*Category:\*\*\s*(.+)/i);
+        if (categoryMatch) {
+          // Category in content overrides filename-based category
+        }
+
+        const impactMatch = ruleContent.match(/\*\*Impact:\*\*\s*(.+)/i);
+        if (impactMatch) {
+          impact = impactMatch[1].trim();
+        }
+
+        const tagsMatch = ruleContent.match(/\*\*Tags:\*\*\s*(.+)/i);
+        if (tagsMatch) {
+          tags = tagsMatch[1].split(',').map((t: string) => t.trim());
+        }
+      }
 
       const id = path.basename(filename, '.md');
       const category = this.extractCategory(filename);
 
       return {
         id,
-        title: titleMatch ? titleMatch[1].trim() : id,
-        impact: (impactMatch ? impactMatch[1].trim() : 'MEDIUM') as Rule['impact'],
-        impactDescription: impactDescMatch ? impactDescMatch[1].trim() : undefined,
-        tags: tagsMatch ? tagsMatch[1].split(',').map((t: string) => t.trim()) : [],
-        content: content.replace(frontmatterMatch[0], '').trim(),
+        title: title || id,
+        impact: impact as Rule['impact'],
+        impactDescription,
+        tags,
+        content: ruleContent,
         category,
       };
     } catch (error) {

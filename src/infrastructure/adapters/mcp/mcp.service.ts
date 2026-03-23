@@ -4,9 +4,13 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { SSEServerTransport } from '@modelcontextprotocol/sdk/server/sse.js';
 import { z } from 'zod';
 import { Response } from 'express';
-import { SessionRepository } from '@infrastructure/persistence/repositories/session.repository';
+import { SessionRepository } from '@modules/sessions/infrastructure/persistence/session.repository';
+import { SessionPurposeRepository } from '@infrastructure/persistence/repositories/session-purpose.repository';
+import { UserRepository } from '@modules/users/infrastructure/persistence/user.repository';
 import { RedisService } from '@infrastructure/database/redis/redis.service';
-import { MessageRole } from '@infrastructure/database/typeorm/entities/chat-message.entity';
+import { MessageRole } from '@modules/sessions/domain/entities/chat-message.entity';
+import { SessionPurpose, SessionPurposeStatus } from '@modules/sessions/domain/entities/session-purpose.entity';
+import { SessionStatus } from '@modules/sessions/domain/entities/session.entity';
 
 export interface McpSession {
   server: McpServer;
@@ -24,6 +28,8 @@ export class McpService {
   constructor(
     private readonly configService: ConfigService,
     private readonly sessionRepository: SessionRepository,
+    private readonly sessionPurposeRepository: SessionPurposeRepository,
+    private readonly userRepository: UserRepository,
     private readonly redisService: RedisService,
   ) {
     this.apiPort = this.configService.get<number>('PORT', 8004);
@@ -31,6 +37,8 @@ export class McpService {
 
   /**
    * Finds an active session by clientId
+   * If session exists but has no user_id, it will be updated
+   * Also tries to resume session from an active purpose if available
    */
   async findActiveSessionId(clientId: string): Promise<string | null> {
     try {
@@ -41,22 +49,85 @@ export class McpService {
         const session = await this.sessionRepository.findBySessionId(cachedSessionId);
         if (session && session.status === 'active') {
           this.logger.debug(`♻️ Session found in cache: ${cachedSessionId}`);
+
+          // FIX: If session has no user_id, update it
+          if (!session.userId) {
+            const ipAddress = clientId.replace('ip-', '');
+            const { user } = await this.userRepository.findByIpOrCreate({ ipAddress });
+
+            // Update session with user_id
+            await this.sessionRepository.getRepository().update(
+              { id: session.id },
+              { userId: user.id },
+            );
+
+            this.logger.log(`🔧 Fixed session ${cachedSessionId}: Added userId ${user.id}`);
+          }
+
           return cachedSessionId;
         }
       }
 
       // Search in PostgreSQL
       const sessions = await this.sessionRepository.getActiveSessions();
-      const matchingSession = sessions.find(s => 
-        s.metadata?.clientId === clientId || 
+      const matchingSession = sessions.find(s =>
+        s.metadata?.clientId === clientId ||
         s.metadata?.clientIp === clientId.replace('ip-', '')
       );
 
       if (matchingSession) {
+        // FIX: If session has no user_id, update it
+        if (!matchingSession.userId) {
+          const ipAddress = clientId.replace('ip-', '');
+          const { user } = await this.userRepository.findByIpOrCreate({ ipAddress });
+
+          await this.sessionRepository.getRepository().update(
+            { id: matchingSession.id },
+            { userId: user.id },
+          );
+
+          this.logger.log(`🔧 Fixed session ${matchingSession.sessionId}: Added userId ${user.id}`);
+        }
+
         // Cache for next time
         await this.redisService.set(`client:${clientId}:sessionId`, matchingSession.sessionId, 3600);
         this.logger.debug(`♻️ Session found in DB: ${matchingSession.sessionId}`);
         return matchingSession.sessionId;
+      }
+
+      // TRY TO RESUME FROM ACTIVE PURPOSE
+      // If no active session found, try to find an active purpose for this user
+      const ipAddress = clientId.replace('ip-', '');
+      const { user } = await this.userRepository.findByIpOrCreate({ ipAddress });
+      
+      if (user?.id) {
+        const activePurposes = await this.sessionPurposeRepository.findActiveByUserId(user.id);
+        
+        if (activePurposes.length > 0) {
+          // Find the most recent active purpose
+          const latestPurpose = activePurposes[0];
+          this.logger.log(`🔄 Found active purpose "${latestPurpose.title}" for user ${user.id}, attempting to resume...`);
+          
+          // Try to find the last session for this purpose
+          if (latestPurpose.lastSessionId) {
+            const lastSession = await this.sessionRepository.findBySessionId(latestPurpose.lastSessionId);
+            
+            if (lastSession) {
+              // Reactivate the session if it was expired
+              if (lastSession.status === 'expired') {
+                await this.sessionRepository.getRepository().update(
+                  { id: lastSession.id },
+                  { status: SessionStatus.ACTIVE },
+                );
+                this.logger.log(`✅ Resumed expired session ${lastSession.sessionId} for purpose "${latestPurpose.title}"`);
+              } else {
+                this.logger.log(`♻️ Found existing session ${lastSession.sessionId} for purpose "${latestPurpose.title}"`);
+              }
+              
+              return lastSession.sessionId;
+            }
+          }
+        }
       }
     } catch (error) {
       this.logger.error(`Error finding session: ${error.message}`);
@@ -85,6 +156,8 @@ export class McpService {
 
   /**
    * Creates a new MCP session with its transport
+   * Does NOT create session in DB yet - only creates runtime session
+   * Session will be created in DB when first message is sent (with purpose)
    */
   async createSession(res: Response, clientId?: string): Promise<{ sessionId: string; session: McpSession }> {
     const transport = new SSEServerTransport('/mcp/message', res);
@@ -107,53 +180,127 @@ export class McpService {
     await server.connect(transport);
 
     // Transport generates its own sessionId
-    const sessionId = transport.sessionId;
+    const transportSessionId = transport.sessionId;
     const session: McpSession = { server, transport };
-    this.sessions.set(sessionId, session);
+    this.sessions.set(transportSessionId, session);
 
-    // SAVE TO POSTGRESQL
+    // Extract IP from clientId (format: "ip-::ffff:127.0.0.1-timestamp")
+    const ipMatch = clientId?.match(/^ip-(.+?)(-\d+)?$/);
+    const ipAddress = ipMatch ? ipMatch[1] : (res.req?.ip || 'unknown');
+
+    // STEP 1: Create or get user by IP - but DON'T create session yet
+    const { user, isNew } = await this.userRepository.findByIpOrCreate({
+      ipAddress,
+      email: undefined,
+      name: undefined,
+    });
+
+    const userId = user.id;
+    this.logger.debug(`👤 User ${isNew ? 'created' : 'found'} for IP ${ipAddress}: ${userId}`);
+
+    // STEP 2: Store user info in Redis for later session creation
+    // Session will be created when first tool is called (meaningful interaction)
     try {
-      const createdSession = await this.sessionRepository.create({
-        sessionId,
-        title: 'MCP Session',
-        metadata: {
-          type: 'mcp',
-          clientId,
-          clientIp: res.req?.ip,
-          createdAt: new Date().toISOString(),
-        },
-      });
-      
-      // Store clientId -> sessionId in Redis for fast lookups
-      if (clientId) {
-        await this.redisService.set(`client:${clientId}:sessionId`, sessionId, 86400);
-      }
-      
-      this.logger.debug(`💾 Session saved to PostgreSQL: ${sessionId} (clientId: ${clientId})`);
+      await this.redisService.set(`session:${transportSessionId}:userId`, userId, 3600);
+      await this.redisService.set(`session:${transportSessionId}:clientId`, clientId || '', 3600);
+      await this.redisService.set(`session:${transportSessionId}:ip`, ipAddress, 3600);
+      this.logger.debug(`💾 Session metadata stored in Redis (waiting for first interaction): ${transportSessionId}`);
     } catch (error) {
-      this.logger.error(`Error saving session to DB: ${error.message}`);
+      this.logger.error(`Error storing session metadata in Redis: ${error.message}`);
     }
 
-    // SAVE TO REDIS
-    try {
-      await this.redisService.setSession(sessionId, {
-        type: 'mcp',
-        clientId,
-        createdAt: Date.now(),
-      }, 86400);
-      this.logger.debug(`💾 Session saved to Redis: ${sessionId}`);
-    } catch (error) {
-      this.logger.error(`Error saving session to Redis: ${error.message}`);
+    // Store clientId -> sessionId in Redis for fast lookups (short TTL, 1 hour)
+    if (clientId) {
+      await this.redisService.set(`client:${clientId}:sessionId`, transportSessionId, 3600);
     }
 
-    this.logger.log(`✅ MCP: Session created: ${sessionId}`);
+    this.logger.log(`✅ MCP: Runtime session created (not persisted yet): ${transportSessionId}`);
 
     // Cleanup when connection closes
     res.on('close', () => {
-      this.closeSession(sessionId);
+      this.closeSession(transportSessionId);
     });
 
-    return { sessionId, session };
+    return { sessionId: transportSessionId, session };
+  }
+
+  /**
+   * Creates or gets session for a user when first tool is called
+   * This is when we actually create the session in DB with a purpose
+   */
+  async getOrCreateSessionForToolUse(
+    sessionId: string,
+    userId: string,
+    toolName: string,
+    clientId?: string,
+    ipAddress?: string,
+  ): Promise<string> {
+    // Check if session already exists in DB
+    const existingDbSession = await this.sessionRepository.findBySessionId(sessionId);
+
+    if (existingDbSession) {
+      this.logger.debug(`♻️ Session already exists in DB: ${sessionId}`);
+      return existingDbSession.sessionId;
+    }
+
+    // Create new session with purpose based on first tool used
+    const purposeText = `Initial tool: ${toolName}`;
+
+    try {
+      // Check if there's an active purpose that matches this tool
+      const activePurposes = await this.sessionPurposeRepository.findActiveByUserId(userId);
+      let purposeId: string | undefined;
+
+      // Try to find or create a purpose for this tool
+      const existingPurpose = activePurposes.find(p => 
+        p.title.includes(toolName) || p.metadata?.firstTool === toolName
+      );
+
+      if (existingPurpose) {
+        purposeId = existingPurpose.id;
+        await this.sessionPurposeRepository.incrementSessionCount(existingPurpose.id);
+        this.logger.debug(`♻️ Reusing existing purpose: ${existingPurpose.title}`);
+      } else {
+        // Create new purpose
+        const newPurpose = await this.sessionPurposeRepository.create({
+          userId,
+          title: `MCP Session - ${toolName}`,
+          description: `Working on ${toolName} related tasks`,
+          initialSessionId: sessionId,
+          metadata: {
+            type: 'mcp',
+            firstTool: toolName,
+            clientId,
+            clientIp: ipAddress,
+            createdAt: new Date().toISOString(),
+          },
+        });
+        purposeId = newPurpose.id;
+        this.logger.log(`🎯 Created new purpose: ${newPurpose.title} (ID: ${purposeId})`);
+      }
+
+      // Create the session with the purpose
+      await this.sessionRepository.create({
+        sessionId,
+        userId,
+        title: `MCP Session - ${toolName}`,
+        purpose: purposeText,
+        purposeId,
+        metadata: {
+          type: 'mcp',
+          clientId,
+          clientIp: ipAddress,
+          firstTool: toolName,
+          createdAt: new Date().toISOString(),
+        },
+      });
+
+      this.logger.debug(`💾 Session created on first tool use: ${sessionId} (purposeId: ${purposeId})`);
+    } catch (error) {
+      this.logger.error(`Error creating session on first tool use: ${error.message}`);
+    }
+
+    return sessionId;
   }
 
   /**
@@ -183,9 +330,32 @@ export class McpService {
 
   /**
    * Saves a chat message to PostgreSQL
+   * Creates session if it doesn't exist (for conversations)
    */
   async saveChatMessage(sessionId: string, role: MessageRole, content: string, metadata?: any): Promise<void> {
     try {
+      // Get user info from Redis
+      const userId = await this.redisService.get<string>(`session:${sessionId}:userId`);
+      const clientId = await this.redisService.get<string>(`session:${sessionId}:clientId`);
+      const ipAddress = await this.redisService.get<string>(`session:${sessionId}:ip`);
+
+      // Create session if it doesn't exist (first message)
+      if (userId) {
+        const createdSessionId = await this.getOrCreateSessionForToolUse(
+          sessionId,
+          userId,
+          'conversation',
+          clientId || undefined,
+          ipAddress || undefined,
+        );
+
+        // Update purpose's lastSessionId
+        const session = await this.sessionRepository.findBySessionId(createdSessionId);
+        if (session?.purposeId) {
+          await this.sessionPurposeRepository.updateLastSession(session.purposeId, createdSessionId);
+        }
+      }
+
       await this.sessionRepository.addMessage({
         sessionId,
         role,
@@ -211,7 +381,25 @@ export class McpService {
         category: z.string().optional().describe('Category (nestjs, angular, typescript)'),
         limit: z.number().default(5).describe('Maximum number of results'),
       },
-      async ({ query, category, limit }) => {
+      async ({ query, category, limit }, extra) => {
+        // Get session info from request context
+        const sessionId = extra?.sessionId || 'unknown';
+        
+        // Get user info from Redis (stored during session creation)
+        const userId = await this.redisService.get<string>(`session:${sessionId}:userId`);
+        const ipAddress = await this.redisService.get<string>(`session:${sessionId}:ip`);
+
+        // Create session in DB on first tool use (meaningful interaction)
+        if (userId) {
+          await this.getOrCreateSessionForToolUse(
+            sessionId, 
+            userId, 
+            'search_rules', 
+            ipAddress ? `ip-${ipAddress}` : undefined, 
+            ipAddress || undefined,
+          );
+        }
+
         this.logger.log(`🔍 MCP: search_rules called - query="${query}", category=${category}, limit=${limit}`);
         try {
           const url = `http://localhost:${this.apiPort}/rules/search?q=${encodeURIComponent(query)}${
@@ -237,7 +425,22 @@ export class McpService {
       {
         id: z.string().describe('Rule ID'),
       },
-      async ({ id }) => {
+      async ({ id }, extra) => {
+        const sessionId = extra?.sessionId || 'unknown';
+        const userId = await this.redisService.get<string>(`session:${sessionId}:userId`);
+        const ipAddress = await this.redisService.get<string>(`session:${sessionId}:ip`);
+
+        // Create session in DB on first tool use
+        if (userId) {
+          await this.getOrCreateSessionForToolUse(
+            sessionId, 
+            userId, 
+            'get_rule', 
+            ipAddress ? `ip-${ipAddress}` : undefined, 
+            ipAddress || undefined,
+          );
+        }
+
         this.logger.log(`📖 MCP: get_rule called - id=${id}`);
         try {
           const response = await fetch(`http://localhost:${this.apiPort}/rules?id=${encodeURIComponent(id)}`);
@@ -261,7 +464,22 @@ export class McpService {
         category: z.string().optional().describe('Filtrar por categoría'),
         limit: z.number().default(50).describe('Número máximo'),
       },
-      async ({ category, limit }) => {
+      async ({ category, limit }, extra) => {
+        const sessionId = extra?.sessionId || 'unknown';
+        const userId = await this.redisService.get<string>(`session:${sessionId}:userId`);
+        const ipAddress = await this.redisService.get<string>(`session:${sessionId}:ip`);
+
+        // Create session in DB on first tool use
+        if (userId) {
+          await this.getOrCreateSessionForToolUse(
+            sessionId, 
+            userId, 
+            'list_rules', 
+            ipAddress ? `ip-${ipAddress}` : undefined, 
+            ipAddress || undefined,
+          );
+        }
+
         this.logger.log(`📋 MCP: list_rules llamado - category=${category}, limit=${limit}`);
         try {
           const url = `http://localhost:${this.apiPort}/rules${
