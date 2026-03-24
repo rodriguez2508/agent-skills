@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Body, Query, BadRequestException } from '@nestjs/common';
+import { Controller, Get, Post, Body, Query, BadRequestException, Logger } from '@nestjs/common';
 import { QueryBus } from '@nestjs/cqrs';
 import { ApiTags, ApiOperation, ApiOkResponse } from '@nestjs/swagger';
 import { SearchRulesQuery } from '@application/queries/search-rules/search-rules.query';
@@ -6,11 +6,17 @@ import { GetRuleQuery } from '@application/queries/get-rule/get-rule.query';
 import { ListRulesQuery } from '@application/queries/list-rules/list-rules.query';
 import { SearchRulesDto } from '@presentation/dto/search-rules.dto';
 import { RuleResponseDto, RuleResultDto } from '@presentation/dto/rule-response.dto';
+import { RulesEngine } from '@infrastructure/rules/rules-engine';
 
 @ApiTags('Rules')
 @Controller('rules')
 export class RulesController {
-  constructor(private readonly queryBus: QueryBus) {}
+  private readonly logger = new Logger(RulesController.name);
+
+  constructor(
+    private readonly queryBus: QueryBus,
+    private readonly rulesEngine: RulesEngine,
+  ) {}
 
   @Post('search')
   @ApiOperation({ summary: 'Search rules using BM25 algorithm' })
@@ -85,5 +91,35 @@ export class RulesController {
       new ListRulesQuery(category, limitValue),
     );
     return { rules };
+  }
+
+  @Post('reload')
+  @ApiOperation({ summary: 'Reload all rules from filesystem (clear cache)' })
+  @ApiOkResponse({
+    description: 'Rules reloaded successfully',
+    schema: {
+      type: 'object',
+      properties: {
+        message: { type: 'string' },
+        count: { type: 'number' },
+        rules: { type: 'array', items: { type: 'string' } },
+      },
+    },
+  })
+  async reloadRules() {
+    this.logger.log('🔄 Reloading rules from filesystem...');
+    
+    // Reload rules from filesystem
+    await this.rulesEngine.loadRules();
+    
+    const allRules = this.rulesEngine.getAllRules();
+    
+    this.logger.log(`✅ Rules reloaded: ${allRules.length} rules`);
+    
+    return {
+      message: `Rules reloaded successfully: ${allRules.length} rules`,
+      count: allRules.length,
+      rules: allRules.map(r => `${r.id} (${r.category})`),
+    };
   }
 }

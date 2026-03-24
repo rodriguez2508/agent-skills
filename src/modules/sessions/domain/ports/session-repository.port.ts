@@ -16,6 +16,7 @@ export interface CreateSessionDto {
 export interface SessionStats {
   totalSessions: number;
   activeSessions: number;
+  expiredSessions: number;
   totalMessages: number;
 }
 

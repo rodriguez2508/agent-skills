@@ -39,8 +39,11 @@ export class RulesEngine implements OnModuleInit {
    */
   async loadRules(): Promise<void> {
     try {
-      const allRules = await this.ruleRepository.findAll();
+      // Clear existing rules cache
+      this.rules.clear();
       
+      const allRules = await this.ruleRepository.findAll();
+
       for (const rule of allRules) {
         this.rules.set(rule.id, {
           id: rule.id,

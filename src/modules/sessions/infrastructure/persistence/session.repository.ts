@@ -326,9 +326,10 @@ export class SessionRepository implements ISessionRepository {
    * Get session statistics
    */
   async getStats(): Promise<SessionStats> {
-    const [totalSessions, activeSessions] = await Promise.all([
+    const [totalSessions, activeSessions, expiredSessions] = await Promise.all([
       this.repository.count(),
       this.repository.count({ where: { status: SessionStatus.ACTIVE } }),
+      this.repository.count({ where: { status: SessionStatus.EXPIRED } }),
     ]);
 
     const totalMessages = await this.messageRepository.count();
@@ -336,6 +337,7 @@ export class SessionRepository implements ISessionRepository {
     return {
       totalSessions,
       activeSessions,
+      expiredSessions,
       totalMessages,
     };
   }
