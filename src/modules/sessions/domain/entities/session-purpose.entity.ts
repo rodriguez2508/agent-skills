@@ -78,6 +78,8 @@ export class SessionPurpose {
     keyDecisions?: string[];
     openQuestions?: string[];
     lastUpdatedAt?: string;
+    issueId?: string; // Link to Issue entity
+    issueWorkflowStep?: string;
     [key: string]: any;
   };
 

@@ -101,7 +101,10 @@
       "^@core/(.*)$": "<rootDir>/core/$1",
       "^@application/(.*)$": "<rootDir>/application/$1",
       "^@infrastructure/(.*)$": "<rootDir>/infrastructure/$1",
-      "^@presentation/(.*)$": "<rootDir>/presentation/$1"
+      "^@presentation/(.*)$": "<rootDir>/presentation/$1",
+      "^@modules/(.*)$": "<rootDir>/modules/$1",
+      "^@agents/(.*)$": "<rootDir>/agents/$1",
+      "^@shared/(.*)$": "<rootDir>/shared/$1"
     }
   }
 }

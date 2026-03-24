@@ -161,6 +161,15 @@ export class RouterAgent extends BaseAgent {
   private detectIntention(input: string): string {
     const lowerInput = input.toLowerCase();
 
+    // Patrones de issues/workflow (PRIORIDAD ALTA)
+    if (this.matchesPattern(lowerInput, [
+      'issue', 'ticket', 'tarea', 'task', 'problema', 'bug', 
+      'feature', 'historia', 'story', 'commit', 'pull request', 
+      'pr', 'workflow', 'iniciar issue', 'continuar issue', 'retomar issue'
+    ])) {
+      return 'issue-workflow';
+    }
+
     // Patrones de búsqueda
     if (this.matchesPattern(lowerInput, ['buscar', 'encuentra', 'search', 'qué hay', 'mostrar reglas'])) {
       return 'search';
@@ -212,6 +221,7 @@ export class RouterAgent extends BaseAgent {
       'analysis': 'AnalysisAgent',
       'identity': 'IdentityAgent',
       'metrics': 'MetricsAgent',
+      'issue-workflow': 'IssueWorkflowAgent',
     };
 
     const targetAgentId = agentMap[intention];

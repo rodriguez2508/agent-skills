@@ -27,6 +27,7 @@ export const createTypeORMConfig = (
     entities: [
       path.join(__dirname, '../../../modules/users/domain/entities/*.entity{.ts,.js}'),
       path.join(__dirname, '../../../modules/sessions/domain/entities/*.entity{.ts,.js}'),
+      path.join(__dirname, '../../../modules/issues/domain/entities/*.entity{.ts,.js}'),
     ],
 
     // Migrations for schema changes
