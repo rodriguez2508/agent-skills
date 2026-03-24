@@ -156,8 +156,7 @@ export class McpService {
 
   /**
    * Creates a new MCP session with its transport
-   * Does NOT create session in DB yet - only creates runtime session
-   * Session will be created in DB when first message is sent (with purpose)
+   * Creates session in DB immediately with initial purpose
    */
   async createSession(res: Response, clientId?: string): Promise<{ sessionId: string; session: McpSession }> {
     const transport = new SSEServerTransport('/mcp/message', res);
@@ -188,7 +187,7 @@ export class McpService {
     const ipMatch = clientId?.match(/^ip-(.+?)(-\d+)?$/);
     const ipAddress = ipMatch ? ipMatch[1] : (res.req?.ip || 'unknown');
 
-    // STEP 1: Create or get user by IP - but DON'T create session yet
+    // STEP 1: Create or get user by IP
     const { user, isNew } = await this.userRepository.findByIpOrCreate({
       ipAddress,
       email: undefined,
@@ -198,13 +197,54 @@ export class McpService {
     const userId = user.id;
     this.logger.debug(`👤 User ${isNew ? 'created' : 'found'} for IP ${ipAddress}: ${userId}`);
 
-    // STEP 2: Store user info in Redis for later session creation
-    // Session will be created when first tool is called (meaningful interaction)
+    // STEP 2: Create purpose for this session immediately
+    let purposeId: string | undefined;
+    try {
+      const newPurpose = await this.sessionPurposeRepository.create({
+        userId,
+        title: `MCP Session - ${clientId || 'New Session'}`,
+        description: `User connected from IP ${ipAddress}`,
+        metadata: {
+          type: 'mcp',
+          clientId,
+          clientIp: ipAddress,
+          createdAt: new Date().toISOString(),
+          status: 'connecting',
+        },
+      });
+      purposeId = newPurpose.id;
+      this.logger.log(`🎯 Created new purpose: ${newPurpose.title} (ID: ${purposeId})`);
+    } catch (error) {
+      this.logger.error(`Error creating purpose: ${error.message}`);
+    }
+
+    // STEP 3: Create session in PostgreSQL immediately (not just in memory)
+    try {
+      await this.sessionRepository.create({
+        sessionId: transportSessionId,
+        userId,
+        title: `MCP Session - ${clientId || 'New Session'}`,
+        purpose: 'Initial connection',
+        purposeId,
+        metadata: {
+          type: 'mcp',
+          clientId,
+          clientIp: ipAddress,
+          createdAt: new Date().toISOString(),
+        },
+      });
+      this.logger.log(`💾 Session created in PostgreSQL: ${transportSessionId}`);
+    } catch (error) {
+      this.logger.error(`Error creating session in DB: ${error.message}`);
+    }
+
+    // STEP 4: Store user info in Redis for fast lookups
     try {
       await this.redisService.set(`session:${transportSessionId}:userId`, userId, 3600);
       await this.redisService.set(`session:${transportSessionId}:clientId`, clientId || '', 3600);
       await this.redisService.set(`session:${transportSessionId}:ip`, ipAddress, 3600);
-      this.logger.debug(`💾 Session metadata stored in Redis (waiting for first interaction): ${transportSessionId}`);
+      await this.redisService.set(`session:${transportSessionId}:purposeId`, purposeId || '', 3600);
+      this.logger.debug(`💾 Session metadata stored in Redis: ${transportSessionId}`);
     } catch (error) {
       this.logger.error(`Error storing session metadata in Redis: ${error.message}`);
     }
@@ -214,7 +254,7 @@ export class McpService {
       await this.redisService.set(`client:${clientId}:sessionId`, transportSessionId, 3600);
     }
 
-    this.logger.log(`✅ MCP: Runtime session created (not persisted yet): ${transportSessionId}`);
+    this.logger.log(`✅ MCP: Session created (runtime + PostgreSQL): ${transportSessionId}`);
 
     // Cleanup when connection closes
     res.on('close', () => {
@@ -226,7 +266,7 @@ export class McpService {
 
   /**
    * Creates or gets session for a user when first tool is called
-   * This is when we actually create the session in DB with a purpose
+   * Now session is created immediately on connection, this just updates the purpose
    */
   async getOrCreateSessionForToolUse(
     sessionId: string,
@@ -239,67 +279,16 @@ export class McpService {
     const existingDbSession = await this.sessionRepository.findBySessionId(sessionId);
 
     if (existingDbSession) {
+      // Update purpose if needed
+      if (existingDbSession.purposeId) {
+        await this.sessionPurposeRepository.updateLastSession(existingDbSession.purposeId, sessionId);
+      }
       this.logger.debug(`♻️ Session already exists in DB: ${sessionId}`);
       return existingDbSession.sessionId;
     }
 
-    // Create new session with purpose based on first tool used
-    const purposeText = `Initial tool: ${toolName}`;
-
-    try {
-      // Check if there's an active purpose that matches this tool
-      const activePurposes = await this.sessionPurposeRepository.findActiveByUserId(userId);
-      let purposeId: string | undefined;
-
-      // Try to find or create a purpose for this tool
-      const existingPurpose = activePurposes.find(p => 
-        p.title.includes(toolName) || p.metadata?.firstTool === toolName
-      );
-
-      if (existingPurpose) {
-        purposeId = existingPurpose.id;
-        await this.sessionPurposeRepository.incrementSessionCount(existingPurpose.id);
-        this.logger.debug(`♻️ Reusing existing purpose: ${existingPurpose.title}`);
-      } else {
-        // Create new purpose
-        const newPurpose = await this.sessionPurposeRepository.create({
-          userId,
-          title: `MCP Session - ${toolName}`,
-          description: `Working on ${toolName} related tasks`,
-          initialSessionId: sessionId,
-          metadata: {
-            type: 'mcp',
-            firstTool: toolName,
-            clientId,
-            clientIp: ipAddress,
-            createdAt: new Date().toISOString(),
-          },
-        });
-        purposeId = newPurpose.id;
-        this.logger.log(`🎯 Created new purpose: ${newPurpose.title} (ID: ${purposeId})`);
-      }
-
-      // Create the session with the purpose
-      await this.sessionRepository.create({
-        sessionId,
-        userId,
-        title: `MCP Session - ${toolName}`,
-        purpose: purposeText,
-        purposeId,
-        metadata: {
-          type: 'mcp',
-          clientId,
-          clientIp: ipAddress,
-          firstTool: toolName,
-          createdAt: new Date().toISOString(),
-        },
-      });
-
-      this.logger.debug(`💾 Session created on first tool use: ${sessionId} (purposeId: ${purposeId})`);
-    } catch (error) {
-      this.logger.error(`Error creating session on first tool use: ${error.message}`);
-    }
-
+    // Fallback: Create session if it doesn't exist (shouldn't happen normally)
+    this.logger.warn(`⚠️ Session not found, creating on-the-fly: ${sessionId}`);
     return sessionId;
   }
 
@@ -372,6 +361,41 @@ export class McpService {
   private registerTools(server: McpServer) {
     this.logger.log('🔧 MCP: Registering tools...');
 
+    // auto_apply_rules - Automatically searches and applies relevant rules to user queries
+    server.tool(
+      'auto_apply_rules',
+      'Automatically searches and applies relevant code rules to the user query. This tool should be called on every user message to provide context-aware responses.',
+      {
+        userQuery: z.string().describe('The user\'s question or request'),
+        sessionId: z.string().optional().describe('Session ID for tracking'),
+      },
+      async ({ userQuery, sessionId }, extra) => {
+        const currentSessionId = sessionId || extra?.sessionId || 'unknown';
+        
+        this.logger.log(`🤖 MCP: auto_apply_rules triggered - query="${userQuery.substring(0, 100)}..."`);
+        
+        try {
+          // Search for relevant rules
+          const url = `http://localhost:${this.apiPort}/rules/search?q=${encodeURIComponent(userQuery)}&limit=5`;
+          const response = await fetch(url);
+          const data = await response.json();
+          
+          if (data.results && data.results.length > 0) {
+            this.logger.log(`✅ MCP: Found ${data.results.length} relevant rules`);
+            const text = this.formatResponse('search', data);
+            return { content: [{ type: 'text' as const, text }] };
+          } else {
+            this.logger.debug('ℹ️ MCP: No relevant rules found');
+            return { content: [{ type: 'text' as const, text: '🎓 **Según CodeMentor MCP**: No se encontraron reglas relevantes para esta consulta.' }] };
+          }
+        } catch (error) {
+          const msg = error instanceof Error ? error.message : 'Error';
+          this.logger.error(`❌ MCP: auto_apply_rules failed - ${msg}`);
+          return { content: [{ type: 'text' as const, text: `⚠️ 🎓 According to CodeMentor MCP: ${msg}` }], isError: true };
+        }
+      },
+    );
+
     // search_rules
     server.tool(
       'search_rules',
@@ -384,7 +408,7 @@ export class McpService {
       async ({ query, category, limit }, extra) => {
         // Get session info from request context
         const sessionId = extra?.sessionId || 'unknown';
-        
+
         // Get user info from Redis (stored during session creation)
         const userId = await this.redisService.get<string>(`session:${sessionId}:userId`);
         const ipAddress = await this.redisService.get<string>(`session:${sessionId}:ip`);
@@ -392,10 +416,10 @@ export class McpService {
         // Create session in DB on first tool use (meaningful interaction)
         if (userId) {
           await this.getOrCreateSessionForToolUse(
-            sessionId, 
-            userId, 
-            'search_rules', 
-            ipAddress ? `ip-${ipAddress}` : undefined, 
+            sessionId,
+            userId,
+            'search_rules',
+            ipAddress ? `ip-${ipAddress}` : undefined,
             ipAddress || undefined,
           );
         }
@@ -482,9 +506,11 @@ export class McpService {
 
         this.logger.log(`📋 MCP: list_rules llamado - category=${category}, limit=${limit}`);
         try {
-          const url = `http://localhost:${this.apiPort}/rules${
-            category ? `?category=${category}` : ''
-          }&limit=${limit || 50}`;
+          const params = new URLSearchParams();
+          if (category) params.set('category', category);
+          params.set('limit', String(limit || 50));
+          
+          const url = `http://localhost:${this.apiPort}/rules?${params.toString()}`;
           const response = await fetch(url);
           const data = await response.json();
           const text = this.formatResponse('list', data);
@@ -511,7 +537,7 @@ export class McpService {
       let response = `${prefix}: Encontré ${data.results.length} regla(s):\n\n`;
       data.results.forEach((r: any, i: number) => {
         response += `### ${i + 1}. ${r.rule.name}\n`;
-        response += `**Categoría:** ${r.rule.category} | **Relevancia:** ${(r.score * 100).toFixed(1)}%\n`;
+        response += `**Categoría:** ${r.rule.category} | **Impacto:** ${r.rule.impact}${r.rule.impactDescription ? ` (${r.rule.impactDescription})` : ''} | **Relevancia:** ${(r.score * 100).toFixed(1)}%\n`;
         response += `**Tags:** ${r.rule.tags?.join(', ') || 'N/A'}\n\n`;
         response += `${r.rule.content.substring(0, 400)}${r.rule.content.length > 400 ? '...' : ''}\n\n---\n\n`;
       });
@@ -520,7 +546,12 @@ export class McpService {
 
     if (type === 'get') {
       if (!data.rule) return `${prefix}: No encontré regla con ese ID.`;
-      return `${prefix}:\n\n# ${data.rule.name}\n\n${data.rule.content}`;
+      let response = `${prefix}:\n\n# ${data.rule.name}\n\n`;
+      if (data.rule.impactDescription) {
+        response += `**Impacto:** ${data.rule.impact} - ${data.rule.impactDescription}\n\n`;
+      }
+      response += data.rule.content;
+      return response;
     }
 
     if (type === 'list') {
@@ -536,7 +567,8 @@ export class McpService {
       for (const [cat, rules] of Object.entries(grouped)) {
         response += `## 📁 ${cat.toUpperCase()}\n`;
         (rules as any[]).forEach((r, i) => {
-          response += `${i + 1}. **${r.name}** (\`${r.id}\`)\n`;
+          const impactInfo = r.impactDescription ? ` - ${r.impact}` : '';
+          response += `${i + 1}. **${r.name}** (\`${r.id}\`)${impactInfo}\n`;
         });
         response += '\n';
       }

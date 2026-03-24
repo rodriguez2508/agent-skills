@@ -189,4 +189,74 @@ export class SessionPurposeRepository {
       },
     });
   }
+
+  /**
+   * Updates the context and next steps for a purpose
+   * This allows tracking conversation progress and planning future interactions
+   */
+  async updateContext(
+    purposeId: string,
+    context: {
+      currentContext?: string;
+      nextSteps?: string[];
+      keyDecisions?: string[];
+      openQuestions?: string[];
+      [key: string]: any;
+    },
+  ): Promise<void> {
+    const purpose = await this.repository.findOne({ where: { id: purposeId } });
+    if (!purpose) return;
+
+    // Merge existing metadata with new context
+    const updatedMetadata = {
+      ...purpose.metadata,
+      ...context,
+      lastUpdatedAt: new Date().toISOString(),
+    };
+
+    await this.repository.update(purposeId, {
+      metadata: updatedMetadata as any,
+      lastActivityAt: new Date(),
+    });
+  }
+
+  /**
+   * Adds a key decision to the purpose's metadata
+   */
+  async addKeyDecision(purposeId: string, decision: string): Promise<void> {
+    const purpose = await this.repository.findOne({ where: { id: purposeId } });
+    if (!purpose) return;
+
+    const decisions = purpose.metadata?.keyDecisions || [];
+    decisions.push(decision);
+
+    await this.repository.update(purposeId, {
+      metadata: {
+        ...purpose.metadata,
+        keyDecisions: decisions,
+        lastUpdatedAt: new Date().toISOString(),
+      } as any,
+      lastActivityAt: new Date(),
+    });
+  }
+
+  /**
+   * Adds next steps to the purpose's metadata
+   */
+  async addNextSteps(purposeId: string, steps: string[]): Promise<void> {
+    const purpose = await this.repository.findOne({ where: { id: purposeId } });
+    if (!purpose) return;
+
+    const existingSteps = purpose.metadata?.nextSteps || [];
+    const updatedSteps = [...existingSteps, ...steps];
+
+    await this.repository.update(purposeId, {
+      metadata: {
+        ...purpose.metadata,
+        nextSteps: updatedSteps,
+        lastUpdatedAt: new Date().toISOString(),
+      } as any,
+      lastActivityAt: new Date(),
+    });
+  }
 }

@@ -24,7 +24,9 @@ export class BM25Engine implements SearchEngine {
 
   index(rule: Rule): void {
     this.rules.set(rule.id, rule);
-    const content = this.tokenize(`${rule.name} ${rule.content} ${rule.tags.join(' ')}`);
+    // Include impactDescription in the indexed content for better search relevance
+    const searchableContent = `${rule.name} ${rule.content} ${rule.tags.join(' ')} ${rule.impactDescription || ''}`;
+    const content = this.tokenize(searchableContent);
     this.docLengths.set(rule.id, content.length);
 
     for (const token of content) {

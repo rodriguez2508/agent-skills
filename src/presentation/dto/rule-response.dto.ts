@@ -1,4 +1,4 @@
-import { ApiProperty } from '@nestjs/swagger';
+import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Rule, RuleImpact } from '../../core/domain/entities/rule.entity';
 
 export class RuleResponseDto {
@@ -19,6 +19,9 @@ export class RuleResponseDto {
 
   @ApiProperty({ enum: RuleImpact })
   impact: RuleImpact;
+
+  @ApiPropertyOptional()
+  impactDescription?: string;
 }
 
 export class RuleResultDto {

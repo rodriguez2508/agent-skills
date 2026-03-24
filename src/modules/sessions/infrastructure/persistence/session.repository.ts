@@ -39,9 +39,10 @@ export class SessionRepository implements ISessionRepository {
   async create(data: CreateSessionDto): Promise<Session> {
     const session = this.repository.create({
       sessionId: data.sessionId,
-      userId: data.userId,
+      userId: data.userId || undefined,
       title: data.title,
-      purpose: data.purpose ?? null,
+      purpose: data.purpose || undefined,
+      purposeId: data.purposeId || undefined,
       isValidated: false,
       metadata: data.metadata,
       status: SessionStatus.ACTIVE,
@@ -50,7 +51,7 @@ export class SessionRepository implements ISessionRepository {
     });
 
     const saved = await this.repository.save(session);
-    this.logger.debug(`📝 Session created: ${saved.id}`);
+    this.logger.debug(`📝 Session created: ${saved.id} (purposeId: ${data.purposeId || 'none'})`);
     return saved;
   }
 

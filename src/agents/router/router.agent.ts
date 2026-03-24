@@ -7,9 +7,12 @@ import { AgentLoggerService, LogLevel } from '@infrastructure/logging/agent-logg
 /**
  * RouterAgent - Orquestador principal de agentes
  * Detecta la intención del usuario y enruta al agente especializado
+ * Automatically searches for relevant code rules on every request
  */
 @Injectable()
 export class RouterAgent extends BaseAgent {
+  private readonly rulesApiUrl: string;
+
   constructor(
     private readonly agentRegistry: AgentRegistry,
     private readonly agentLogger: AgentLoggerService,
@@ -18,16 +21,34 @@ export class RouterAgent extends BaseAgent {
       'RouterAgent',
       'Orquesta y enruta solicitudes a los agentes especializados',
     );
+    this.rulesApiUrl = `http://localhost:${process.env.PORT || 8004}/rules/search`;
   }
 
   /**
    * Maneja la solicitud detectando intención y enrutando
+   * Automatically searches for relevant rules before routing
    */
   protected async handle(request: AgentRequest): Promise<AgentResponse> {
     this.agentLogger.info(this.agentId, '📥 [ROUTER] Recibida solicitud de enrutamiento', {
       input: request.input.substring(0, 100),
       options: request.options,
     });
+
+    // AUTO-APPLY RULES: Search for relevant rules on every request
+    const relevantRules = await this.searchRelevantRules(request.input);
+    
+    if (relevantRules.length > 0) {
+      this.agentLogger.info(this.agentId, `📚 [ROUTER] Found ${relevantRules.length} relevant rules`, {
+        rules: relevantRules.map(r => r.name),
+      });
+      
+      // Add rules context to the request
+      request.options = {
+        ...request.options,
+        relevantRules,
+        rulesContext: this.formatRulesContext(relevantRules),
+      };
+    }
 
     // Detectar intención
     const intention = this.detectIntention(request.input);
@@ -55,6 +76,7 @@ export class RouterAgent extends BaseAgent {
             "- Analyzing code quality",
           intention,
           availableAgents: this.agentRegistry.getAgentIds(),
+          relevantRules: relevantRules.length > 0 ? relevantRules : undefined,
         },
         metadata: {
           agentId: this.agentId,
@@ -83,7 +105,7 @@ export class RouterAgent extends BaseAgent {
       hasError: !!response.error,
     });
 
-    // Retornar respuesta con contexto de enrutamiento
+    // Retornar respuesta con contexto de enrutamiento y reglas
     return {
       ...response,
       data: {
@@ -91,8 +113,46 @@ export class RouterAgent extends BaseAgent {
         routedBy: this.agentId,
         targetAgent: targetAgent.agentId,
         intention,
+        relevantRules: relevantRules.length > 0 ? relevantRules : undefined,
+        rulesContext: relevantRules.length > 0 ? this.formatRulesContext(relevantRules) : undefined,
       },
     };
+  }
+
+  /**
+   * Automatically searches for relevant code rules
+   */
+  private async searchRelevantRules(query: string): Promise<any[]> {
+    try {
+      const url = `${this.rulesApiUrl}?q=${encodeURIComponent(query)}&limit=5`;
+      const response = await fetch(url);
+      
+      if (!response.ok) {
+        this.agentLogger.warn(this.agentId, `Rules API returned non-OK status: ${response.status}`);
+        return [];
+      }
+      
+      const data = await response.json();
+      return data.results?.map((r: any) => r.rule) || [];
+    } catch (error) {
+      this.agentLogger.error(this.agentId, `Failed to search rules: ${error.message}`);
+      return [];
+    }
+  }
+
+  /**
+   * Formats rules as a context string for agents
+   */
+  private formatRulesContext(rules: any[]): string {
+    if (rules.length === 0) return '';
+    
+    let context = '\n\n📋 **Relevant Code Rules:**\n';
+    rules.forEach((rule, i) => {
+      context += `\n${i + 1}. **${rule.name}** (${rule.category} - ${rule.impact})\n`;
+      context += `   ${rule.content.substring(0, 200)}${rule.content.length > 200 ? '...' : ''}\n`;
+    });
+    
+    return context;
   }
 
   /**

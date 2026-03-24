@@ -151,13 +151,15 @@ export class RuleFileRepository implements RuleRepository {
   private async loadRuleFromFlatFile(file: string): Promise<Rule | null> {
     const filePath = path.join(this.rulesPath, file);
     const id = path.basename(file, '.md');
-    
+
     try {
       const content = fs.readFileSync(filePath, 'utf-8');
       const name = this.extractTitle(content);
       const body = content.replace(/^# .+\n+/, '').trim();
-      const tags = this.extractTags(body);
+      const tags = this.extractTags(content);
       const category = this.extractCategoryFromFilename(id);
+      const impact = this.extractImpact(content);
+      const impactDescription = this.extractImpactDescription(content);
 
       return new Rule({
         id,
@@ -165,11 +167,39 @@ export class RuleFileRepository implements RuleRepository {
         content: body,
         category,
         tags,
-        impact: RuleImpact.MEDIUM,
+        impact,
       });
     } catch {
       return null;
     }
+  }
+
+  private extractImpact(content: string): RuleImpact {
+    // Try frontmatter format first: impact: VALUE
+    const frontmatterMatch = content.match(/^---\n([\s\S]*?)\n---/);
+    if (frontmatterMatch) {
+      const frontmatter = frontmatterMatch[1];
+      const impactMatch = frontmatter.match(/impact:\s*(.+)/i);
+      if (impactMatch) {
+        const impact = impactMatch[1].trim().toUpperCase();
+        if (['LOW', 'MEDIUM', 'HIGH', 'CRITICAL'].includes(impact)) {
+          return impact as RuleImpact;
+        }
+      }
+    }
+    return RuleImpact.MEDIUM;
+  }
+
+  private extractImpactDescription(content: string): string | undefined {
+    const frontmatterMatch = content.match(/^---\n([\s\S]*?)\n---/);
+    if (frontmatterMatch) {
+      const frontmatter = frontmatterMatch[1];
+      const descMatch = frontmatter.match(/impactDescription:\s*["']?(.+?)["']?/i);
+      if (descMatch) {
+        return descMatch[1].trim();
+      }
+    }
+    return undefined;
   }
 
   private extractCategoryFromFilename(filename: string): string {
@@ -219,7 +249,9 @@ export class RuleFileRepository implements RuleRepository {
       const content = fs.readFileSync(filePath, 'utf-8');
       const name = this.extractTitle(content);
       const body = content.replace(/^# .+\n+/, '').trim();
-      const tags = this.extractTags(body);
+      const tags = this.extractTags(content);
+      const impact = this.extractImpact(content);
+      const impactDescription = this.extractImpactDescription(content);
 
       return new Rule({
         id,
@@ -227,7 +259,8 @@ export class RuleFileRepository implements RuleRepository {
         content: body,
         category,
         tags,
-        impact: RuleImpact.MEDIUM,
+        impact,
+        impactDescription,
       });
     } catch {
       return null;
@@ -240,10 +273,22 @@ export class RuleFileRepository implements RuleRepository {
   }
 
   private extractTags(content: string): string[] {
-    const match = content.match(/tags:\s*\[(.+)\]/i);
-    if (match) {
-      return match[1].split(',').map((tag) => tag.trim());
+    // Try frontmatter format first: tags: value1, value2, value3
+    const frontmatterMatch = content.match(/^---\n([\s\S]*?)\n---/);
+    if (frontmatterMatch) {
+      const frontmatter = frontmatterMatch[1];
+      const tagsMatch = frontmatter.match(/tags:\s*(.+)/i);
+      if (tagsMatch) {
+        return tagsMatch[1].split(',').map((t: string) => t.trim());
+      }
     }
+    
+    // Try bracket format: tags: [value1, value2]
+    const bracketMatch = content.match(/tags:\s*\[(.+)\]/i);
+    if (bracketMatch) {
+      return bracketMatch[1].split(',').map((tag) => tag.trim());
+    }
+    
     return [];
   }
 

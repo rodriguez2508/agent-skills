@@ -73,6 +73,11 @@ export class SessionPurpose {
     tags?: string[];
     estimatedSessions?: number;
     actualSessions?: number;
+    currentContext?: string;
+    nextSteps?: string[];
+    keyDecisions?: string[];
+    openQuestions?: string[];
+    lastUpdatedAt?: string;
     [key: string]: any;
   };
 
