@@ -2,12 +2,11 @@
  * Issue Repository
  *
  * Handles persistence operations for Issue entities.
- * Tracks issue workflow progress across sessions.
  */
 
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, Like } from 'typeorm';
+import { Repository } from 'typeorm';
 import { Issue, IssueStatus, IssueWorkflowStep } from '@modules/issues/domain/entities/issue.entity';
 
 export interface CreateIssueDto {
@@ -16,12 +15,12 @@ export interface CreateIssueDto {
   description?: string;
   requirements?: string;
   userId?: string;
-  repositoryUrl?: string;
   metadata?: {
     labels?: string[];
-    assignees?: string[];
-    milestone?: string;
     estimatedHours?: number;
+    autoCreated?: boolean;
+    createdAt?: string;
+    [key: string]: any;
   };
 }
 
@@ -30,10 +29,6 @@ export interface UpdateIssueWorkflowDto {
   completedSteps?: IssueWorkflowStep[];
   nextSteps?: string[];
   keyDecisions?: { decision: string; rationale: string; timestamp: string }[];
-  filesModified?: string[];
-  branchName?: string;
-  prMdPath?: string;
-  prUrl?: string;
 }
 
 @Injectable()
@@ -119,20 +114,15 @@ export class IssueRepository {
   async updateWorkflow(
     issueId: string,
     data: UpdateIssueWorkflowDto,
-    sessionId?: string,
   ): Promise<Issue | null> {
     const updateData: any = {
       ...data,
       lastActivityAt: new Date(),
     };
 
-    if (sessionId) {
-      updateData.lastSessionId = sessionId;
-    }
-
     // If step is completed, add to completedSteps
     if (data.currentStep) {
-      const issue = await this.findByIssueId(issueId);
+      const issue = await this.findById(issueId);
       if (issue && issue.completedSteps) {
         if (!issue.completedSteps.includes(data.currentStep)) {
           updateData.completedSteps = [...issue.completedSteps, data.currentStep];
@@ -141,7 +131,7 @@ export class IssueRepository {
     }
 
     await this.repository.update({ issueId }, updateData);
-    return this.findByIssueId(issueId);
+    return this.findById(issueId);
   }
 
   /**
@@ -156,7 +146,7 @@ export class IssueRepository {
         lastActivityAt: new Date(),
       },
     );
-    return this.findByIssueId(issueId);
+    return this.findById(issueId);
   }
 
   /**
@@ -175,7 +165,7 @@ export class IssueRepository {
     }
 
     await this.repository.update({ issueId }, updateData);
-    return this.findByIssueId(issueId);
+    return this.findById(issueId);
   }
 
   /**
@@ -186,7 +176,7 @@ export class IssueRepository {
     decision: string,
     rationale: string,
   ): Promise<void> {
-    const issue = await this.findByIssueId(issueId);
+    const issue = await this.findById(issueId);
     if (!issue) return;
 
     const decisions = issue.keyDecisions || [];
@@ -203,36 +193,23 @@ export class IssueRepository {
   }
 
   /**
-   * Updates files modified in current session
+   * Adds next steps to the issue
    */
-  async addFilesModified(issueId: string, files: string[]): Promise<void> {
-    const issue = await this.findByIssueId(issueId);
+  async addNextSteps(issueId: string, steps: string[]): Promise<void> {
+    const issue = await this.findById(issueId);
     if (!issue) return;
 
-    const existingFiles = issue.filesModified || [];
-    const uniqueFiles = [...new Set([...existingFiles, ...files])];
+    const existingSteps = issue.nextSteps || [];
+    const updatedSteps = [...existingSteps, ...steps];
 
     await this.repository.update(issueId, {
-      filesModified: uniqueFiles,
+      nextSteps: updatedSteps,
       lastActivityAt: new Date(),
     });
   }
 
   /**
-   * Gets workflow progress as percentage
-   */
-  async getProgress(issueId: string): Promise<number> {
-    const issue = await this.findByIssueId(issueId);
-    if (!issue) return 0;
-
-    const totalSteps = Object.keys(IssueWorkflowStep).length / 2; // Divide by 2 because of enum quirk
-    const completedCount = issue.completedSteps?.length || 0;
-
-    return Math.round((completedCount / totalSteps) * 100);
-  }
-
-  /**
-   * Gets issues by status for statistics
+   * Gets statistics about issues
    */
   async getStats(userId?: string): Promise<{
     total: number;
@@ -249,23 +226,17 @@ export class IssueRepository {
     const [total, open, inProgress, completed, abandoned] = await Promise.all([
       this.repository.count({ where }),
       this.repository.count({ where: { ...where, status: IssueStatus.OPEN } }),
-      this.repository.count({ where: { ...where, status: IssueStatus.IN_PROGRESS } }),
-      this.repository.count({ where: { ...where, status: IssueStatus.COMPLETED } }),
-      this.repository.count({ where: { ...where, status: IssueStatus.ABANDONED } }),
+      this.repository.count({
+        where: { ...where, status: IssueStatus.IN_PROGRESS },
+      }),
+      this.repository.count({
+        where: { ...where, status: IssueStatus.COMPLETED },
+      }),
+      this.repository.count({
+        where: { ...where, status: IssueStatus.ABANDONED },
+      }),
     ]);
 
     return { total, open, inProgress, completed, abandoned };
-  }
-
-  /**
-   * Finds issues that haven't had activity for a while
-   */
-  async findInactiveSince(thresholdDate: Date): Promise<Issue[]> {
-    return this.repository.find({
-      where: {
-        status: IssueStatus.IN_PROGRESS,
-        lastActivityAt: thresholdDate,
-      },
-    });
   }
 }

@@ -2,6 +2,7 @@
  * ChatMessage Entity
  *
  * Represents a message in a chat session.
+ * Messages are linked to both Session and Issue for proper tracking.
  */
 
 import {
@@ -33,6 +34,11 @@ export class ChatMessage {
   @ManyToOne(() => Session, (session) => session.messages, { onDelete: 'CASCADE' })
   @JoinColumn({ name: 'session_id', referencedColumnName: 'sessionId' })
   session?: Session;
+
+  // NEW: Link message to specific issue (optional, for better tracking)
+  @Column({ name: 'issue_id', type: 'uuid', nullable: true })
+  @Index()
+  issueId?: string;
 
   @Column({ type: 'enum', enum: MessageRole, default: MessageRole.USER })
   @Index()

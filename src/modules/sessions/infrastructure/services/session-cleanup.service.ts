@@ -1,24 +1,20 @@
 /**
  * Session Cleanup Service
  *
- * Periodically cleans up invalid, expired, and orphaned sessions.
+ * Periodically cleans up expired and orphaned sessions.
  * Runs every 5 minutes by default using @nestjs/schedule.
  *
  * Cleanup rules:
  * - Unvalidated sessions older than 5 minutes → EXPIRED
- * - Inactive sessions (no activity for 24 hours) → EXPIRED (unless has active purpose)
- * - Expired sessions WITHOUT purpose → DELETED immediately
- * - Expired sessions WITH purpose older than 7 days → DELETED
- * - Sessions with ACTIVE PURPOSE are protected from expiration
+ * - Inactive sessions (no activity for 24 hours) → EXPIRED
+ * - Expired sessions → DELETED immediately
  */
 
 import { Injectable, Logger } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { SessionRepository } from '@modules/sessions/infrastructure/persistence/session.repository';
-import { SessionPurposeRepository } from '@infrastructure/persistence/repositories/session-purpose.repository';
 import { SessionStatus } from '@modules/sessions/domain/entities/session.entity';
-import { SessionPurposeStatus } from '@modules/sessions/domain/entities/session-purpose.entity';
-import { LessThanOrEqual, IsNull, Not, In } from 'typeorm';
+import { LessThanOrEqual, IsNull } from 'typeorm';
 
 @Injectable()
 export class SessionCleanupService {
@@ -27,11 +23,9 @@ export class SessionCleanupService {
   // Configuration
   private readonly UNVALIDATED_SESSION_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes
   private readonly INACTIVE_SESSION_TIMEOUT_MS = 24 * 60 * 60 * 1000; // 24 hours
-  private readonly EXPIRED_SESSION_RETENTION_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
 
   constructor(
     private readonly sessionRepository: SessionRepository,
-    private readonly sessionPurposeRepository: SessionPurposeRepository,
   ) {
     this.logger.log('🗑️ SessionCleanupService initialized');
   }
@@ -45,117 +39,55 @@ export class SessionCleanupService {
 
     const now = new Date();
     let cleanedCount = 0;
-    let protectedCount = 0;
 
     try {
-      // Get all active purposes to protect ONLY their last session
-      const activePurposes = await this.sessionPurposeRepository.getRepository().find({
-        where: { status: SessionPurposeStatus.ACTIVE },
-        select: ['id', 'lastSessionId'],
-      });
-
-      // ONLY protect the lastSessionId of each active purpose (not initialSessionId)
-      const protectedSessionIds = new Set<string>(
-        activePurposes.map(p => p.lastSessionId).filter(Boolean) as string[]
-      );
-
-      protectedCount = protectedSessionIds.size;
-      this.logger.debug(`🛡️ Protecting ${protectedCount} sessions (last session of active purposes)`);
-
-      // 1. Delete expired sessions WITHOUT purpose (IMMEDIATE - highest priority)
-      const expiredSessionsNoPurpose = await this.sessionRepository.getRepository().find({
+      // 1. Delete expired sessions (IMMEDIATE)
+      const expiredSessions = await this.sessionRepository.getRepository().find({
         where: {
           status: SessionStatus.EXPIRED,
-          purposeId: IsNull() as any,
-        },
-        take: 500, // Batch delete
-      });
-
-      for (const session of expiredSessionsNoPurpose) {
-        await this.sessionRepository.delete(session.sessionId);
-        cleanedCount++;
-      }
-
-      if (expiredSessionsNoPurpose.length > 0) {
-        this.logger.log(`🗑️ DELETED ${expiredSessionsNoPurpose.length} expired session(s) without purpose`);
-      }
-
-      // 2. Delete old expired sessions WITH purpose (older than 7 days)
-      const expiredThreshold = new Date(now.getTime() - this.EXPIRED_SESSION_RETENTION_MS);
-      const oldExpiredSessions = await this.sessionRepository.getRepository().find({
-        where: {
-          status: SessionStatus.EXPIRED,
-          updatedAt: LessThanOrEqual(expiredThreshold),
         },
         take: 500,
       });
 
-      let deletedOldCount = 0;
-      for (const session of oldExpiredSessions) {
-        // Don't delete if purpose is still active
-        if (session.purposeId) {
-          const purpose = await this.sessionPurposeRepository.findById(session.purposeId);
-          if (purpose?.status === SessionPurposeStatus.ACTIVE) {
-            this.logger.debug(`🛡️ Keeping expired session ${session.sessionId} - purpose still active`);
-            continue;
-          }
-        }
+      for (const session of expiredSessions) {
         await this.sessionRepository.delete(session.sessionId);
-        deletedOldCount++;
+        cleanedCount++;
       }
 
-      if (deletedOldCount > 0) {
-        this.logger.log(`🗑️ DELETED ${deletedOldCount} old expired session(s)`);
-        cleanedCount += deletedOldCount;
+      if (expiredSessions.length > 0) {
+        this.logger.log(`🗑️ DELETED ${expiredSessions.length} expired session(s)`);
       }
 
-      // 3. Expire unvalidated sessions older than 5 minutes (except protected last sessions)
+      // 2. Expire unvalidated sessions older than 5 minutes
       const unvalidatedThreshold = new Date(now.getTime() - this.UNVALIDATED_SESSION_TIMEOUT_MS);
       const unvalidatedSessions = await this.sessionRepository.findUnvalidatedSessionsOlderThan(unvalidatedThreshold);
 
-      let expiredUnvalidatedCount = 0;
       for (const session of unvalidatedSessions) {
-        // Skip ONLY if it's the last session of an active purpose
-        if (protectedSessionIds.has(session.sessionId)) {
-          this.logger.debug(`🛡️ Skipping protected last session: ${session.sessionId}`);
-          continue;
-        }
-
         await this.sessionRepository.expire(session.sessionId);
-        expiredUnvalidatedCount++;
+        cleanedCount++;
       }
 
-      if (expiredUnvalidatedCount > 0) {
-        this.logger.log(`⏰ EXPIRED ${expiredUnvalidatedCount} unvalidated session(s)`);
-        cleanedCount += expiredUnvalidatedCount;
+      if (unvalidatedSessions.length > 0) {
+        this.logger.log(`⏰ EXPIRED ${unvalidatedSessions.length} unvalidated session(s)`);
       }
 
-      // 4. Expire inactive sessions (no activity for 24 hours) - EXCEPT protected last sessions
+      // 3. Expire inactive sessions (no activity for 24 hours)
       const inactiveThreshold = new Date(now.getTime() - this.INACTIVE_SESSION_TIMEOUT_MS);
       const inactiveSessions = await this.sessionRepository.findInactiveSessionsSince(inactiveThreshold);
 
-      let expiredInactiveCount = 0;
       for (const session of inactiveSessions) {
-        // Skip ONLY if it's the last session of an active purpose
-        if (protectedSessionIds.has(session.sessionId)) {
-          continue;
-        }
-
         await this.sessionRepository.expire(session.sessionId);
-        expiredInactiveCount++;
+        cleanedCount++;
       }
 
-      if (expiredInactiveCount > 0) {
-        this.logger.log(`⏰ EXPIRED ${expiredInactiveCount} inactive session(s) (protected: ${protectedCount})`);
-        cleanedCount += expiredInactiveCount;
+      if (inactiveSessions.length > 0) {
+        this.logger.log(`⏰ EXPIRED ${inactiveSessions.length} inactive session(s)`);
       }
 
-      // 5. Log session statistics
+      // 4. Log session statistics
       const stats = await this.sessionRepository.getStats();
-      const purposeStats = await this.sessionPurposeRepository.getStats();
 
       this.logger.log(`📊 Stats: ${stats.totalSessions} total, ${stats.activeSessions} active, ${stats.expiredSessions || 0} expired, ${stats.totalMessages} messages`);
-      this.logger.log(`📊 Purposes: ${purposeStats.total} total, ${purposeStats.active} active, ${purposeStats.completed} completed`);
       this.logger.log(`🧹 Cleanup completed. Processed ${cleanedCount} session(s)`);
 
     } catch (error) {
@@ -176,68 +108,32 @@ export class SessionCleanupService {
     const now = new Date();
     const result = { expired: 0, inactive: 0, deleted: 0 };
 
-    // Get ONLY lastSessionId from active purposes (not initialSessionId)
-    const activePurposes = await this.sessionPurposeRepository.getRepository().find({
-      where: { status: SessionPurposeStatus.ACTIVE },
-      select: ['id', 'lastSessionId'],
-    });
-
-    const protectedSessionIds = new Set<string>(
-      activePurposes.map(p => p.lastSessionId).filter(Boolean) as string[]
-    );
-
-    // 1. Delete expired sessions WITHOUT purpose (IMMEDIATE)
-    const expiredSessionsNoPurpose = await this.sessionRepository.getRepository().find({
-      where: {
-        status: SessionStatus.EXPIRED,
-        purposeId: IsNull() as any,
-      },
-      take: 500,
-    });
-    for (const session of expiredSessionsNoPurpose) {
-      await this.sessionRepository.delete(session.sessionId);
-      result.deleted++;
-    }
-
-    // 2. Delete old expired sessions WITH purpose (older than 7 days)
-    const expiredThreshold = new Date(now.getTime() - this.EXPIRED_SESSION_RETENTION_MS);
+    // 1. Delete expired sessions (IMMEDIATE)
     const expiredSessions = await this.sessionRepository.getRepository().find({
       where: {
         status: SessionStatus.EXPIRED,
-        updatedAt: LessThanOrEqual(expiredThreshold),
       },
       take: 500,
     });
     for (const session of expiredSessions) {
-      // Don't delete if purpose is still active
-      if (session.purposeId) {
-        const purpose = await this.sessionPurposeRepository.findById(session.purposeId);
-        if (purpose?.status === SessionPurposeStatus.ACTIVE) {
-          continue;
-        }
-      }
       await this.sessionRepository.delete(session.sessionId);
       result.deleted++;
     }
 
-    // 3. Expire unvalidated (except protected last sessions)
+    // 2. Expire unvalidated
     const unvalidatedThreshold = new Date(now.getTime() - this.UNVALIDATED_SESSION_TIMEOUT_MS);
     const unvalidatedSessions = await this.sessionRepository.findUnvalidatedSessionsOlderThan(unvalidatedThreshold);
     for (const session of unvalidatedSessions) {
-      if (!protectedSessionIds.has(session.sessionId)) {
-        await this.sessionRepository.expire(session.sessionId);
-        result.expired++;
-      }
+      await this.sessionRepository.expire(session.sessionId);
+      result.expired++;
     }
 
-    // 4. Expire inactive (except protected last sessions)
+    // 3. Expire inactive
     const inactiveThreshold = new Date(now.getTime() - this.INACTIVE_SESSION_TIMEOUT_MS);
     const inactiveSessions = await this.sessionRepository.findInactiveSessionsSince(inactiveThreshold);
     for (const session of inactiveSessions) {
-      if (!protectedSessionIds.has(session.sessionId)) {
-        await this.sessionRepository.expire(session.sessionId);
-        result.inactive++;
-      }
+      await this.sessionRepository.expire(session.sessionId);
+      result.inactive++;
     }
 
     this.logger.log(`✅ Manual cleanup completed: ${JSON.stringify(result)}`);

@@ -2,7 +2,10 @@
  * Issue Entity
  *
  * Represents a GitHub/GitLab issue that the user is working on.
- * Allows tracking progress across multiple sessions.
+ * This is the MAIN entity for tracking work across sessions.
+ * 
+ * Hierarchy:
+ * User → Issue → Session (with history) → ChatMessage
  */
 
 import {
@@ -14,10 +17,8 @@ import {
   ManyToOne,
   JoinColumn,
   Index,
-  OneToMany,
 } from 'typeorm';
 import { User } from '@modules/users/domain/entities/user.entity';
-import { SessionPurpose } from '@modules/sessions/domain/entities/session-purpose.entity';
 
 export enum IssueStatus {
   OPEN = 'open',
@@ -45,7 +46,7 @@ export class Issue {
 
   @Column({ type: 'varchar', length: 50 })
   @Index()
-  issueId: string; // External issue ID (e.g., "123" or "PROJ-123")
+  issueId: string; // External issue ID (e.g., "123", "PROJ-123")
 
   @Column({ type: 'varchar', length: 500 })
   title: string;
@@ -106,6 +107,9 @@ export class Issue {
     milestone?: string;
     estimatedHours?: number;
     actualHours?: number;
+    autoCreated?: boolean;
+    source?: string;
+    businessValue?: string;
     [key: string]: any;
   };
 
@@ -123,8 +127,4 @@ export class Issue {
 
   @UpdateDateColumn({ name: 'updated_at' })
   updatedAt: Date;
-
-  @OneToMany(() => SessionPurpose, (purpose) => purpose.user)
-  @JoinColumn({ name: 'id' })
-  sessionPurposes?: SessionPurpose[];
 }

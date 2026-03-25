@@ -5,12 +5,12 @@ import { SSEServerTransport } from '@modelcontextprotocol/sdk/server/sse.js';
 import { z } from 'zod';
 import { Response } from 'express';
 import { SessionRepository } from '@modules/sessions/infrastructure/persistence/session.repository';
-import { SessionPurposeRepository } from '@infrastructure/persistence/repositories/session-purpose.repository';
 import { UserRepository } from '@modules/users/infrastructure/persistence/user.repository';
 import { RedisService } from '@infrastructure/database/redis/redis.service';
 import { MessageRole } from '@modules/sessions/domain/entities/chat-message.entity';
-import { SessionPurpose, SessionPurposeStatus } from '@modules/sessions/domain/entities/session-purpose.entity';
 import { SessionStatus } from '@modules/sessions/domain/entities/session.entity';
+import { IssueService } from '@modules/issues/application/services/issue.service';
+import { IssueStatus } from '@modules/issues/domain/entities/issue.entity';
 
 export interface McpSession {
   server: McpServer;
@@ -28,9 +28,9 @@ export class McpService {
   constructor(
     private readonly configService: ConfigService,
     private readonly sessionRepository: SessionRepository,
-    private readonly sessionPurposeRepository: SessionPurposeRepository,
     private readonly userRepository: UserRepository,
     private readonly redisService: RedisService,
+    private readonly issueService: IssueService,
   ) {
     this.apiPort = this.configService.get<number>('PORT', 8004);
   }
@@ -94,41 +94,6 @@ export class McpService {
         this.logger.debug(`♻️ Session found in DB: ${matchingSession.sessionId}`);
         return matchingSession.sessionId;
       }
-
-      // TRY TO RESUME FROM ACTIVE PURPOSE
-      // If no active session found, try to find an active purpose for this user
-      const ipAddress = clientId.replace('ip-', '');
-      const { user } = await this.userRepository.findByIpOrCreate({ ipAddress });
-      
-      if (user?.id) {
-        const activePurposes = await this.sessionPurposeRepository.findActiveByUserId(user.id);
-        
-        if (activePurposes.length > 0) {
-          // Find the most recent active purpose
-          const latestPurpose = activePurposes[0];
-          this.logger.log(`🔄 Found active purpose "${latestPurpose.title}" for user ${user.id}, attempting to resume...`);
-          
-          // Try to find the last session for this purpose
-          if (latestPurpose.lastSessionId) {
-            const lastSession = await this.sessionRepository.findBySessionId(latestPurpose.lastSessionId);
-            
-            if (lastSession) {
-              // Reactivate the session if it was expired
-              if (lastSession.status === 'expired') {
-                await this.sessionRepository.getRepository().update(
-                  { id: lastSession.id },
-                  { status: SessionStatus.ACTIVE },
-                );
-                this.logger.log(`✅ Resumed expired session ${lastSession.sessionId} for purpose "${latestPurpose.title}"`);
-              } else {
-                this.logger.log(`♻️ Found existing session ${lastSession.sessionId} for purpose "${latestPurpose.title}"`);
-              }
-              
-              return lastSession.sessionId;
-            }
-          }
-        }
-      }
     } catch (error) {
       this.logger.error(`Error finding session: ${error.message}`);
     }
@@ -156,7 +121,8 @@ export class McpService {
 
   /**
    * Creates a new MCP session with its transport
-   * Creates session in DB immediately with initial purpose
+   * Creates session in DB immediately
+   * REUSES existing session for same IP if available
    */
   async createSession(res: Response, clientId?: string): Promise<{ sessionId: string; session: McpSession }> {
     const transport = new SSEServerTransport('/mcp/message', res);
@@ -197,76 +163,113 @@ export class McpService {
     const userId = user.id;
     this.logger.debug(`👤 User ${isNew ? 'created' : 'found'} for IP ${ipAddress}: ${userId}`);
 
-    // STEP 2: Create purpose for this session immediately
-    let purposeId: string | undefined;
+    // STEP 2: TRY TO REUSE EXISTING ACTIVE SESSION FOR THIS IP
+    let existingSessionId: string | null = null;
     try {
-      const newPurpose = await this.sessionPurposeRepository.create({
-        userId,
-        title: `MCP Session - ${clientId || 'New Session'}`,
-        description: `User connected from IP ${ipAddress}`,
-        metadata: {
-          type: 'mcp',
-          clientId,
-          clientIp: ipAddress,
-          createdAt: new Date().toISOString(),
-          status: 'connecting',
-        },
-      });
-      purposeId = newPurpose.id;
-      this.logger.log(`🎯 Created new purpose: ${newPurpose.title} (ID: ${purposeId})`);
+      // Check Redis first (faster)
+      const cachedSessionId = await this.redisService.get<string>(`client:ip-${ipAddress}:sessionId`);
+      if (cachedSessionId) {
+        // Verify session exists in DB and is active
+        const dbSession = await this.sessionRepository.findBySessionId(cachedSessionId);
+        if (dbSession && dbSession.status === 'active') {
+          existingSessionId = cachedSessionId;
+          this.logger.log(`♻️ REUSING existing session for IP ${ipAddress}: ${existingSessionId}`);
+        }
+      }
+
+      // If not in Redis, search DB for active session by IP
+      if (!existingSessionId) {
+        const activeSessions = await this.sessionRepository.getActiveSessions(userId);
+        const matchingSession = activeSessions.find(s => 
+          s.metadata?.clientIp === ipAddress || 
+          s.metadata?.ipAddress === ipAddress
+        );
+
+        if (matchingSession) {
+          existingSessionId = matchingSession.sessionId;
+          this.logger.log(`♻️ REUSING existing DB session for IP ${ipAddress}: ${existingSessionId}`);
+          
+          // Cache for next time
+          await this.redisService.set(`client:ip-${ipAddress}:sessionId`, existingSessionId, 3600);
+        }
+      }
     } catch (error) {
-      this.logger.error(`Error creating purpose: ${error.message}`);
+      this.logger.warn(`Error checking for existing session: ${error.message}`);
     }
 
-    // STEP 3: Create session in PostgreSQL immediately (not just in memory)
+    // STEP 3: Create session in PostgreSQL (new or update existing)
     try {
-      await this.sessionRepository.create({
-        sessionId: transportSessionId,
-        userId,
-        title: `MCP Session - ${clientId || 'New Session'}`,
-        purpose: 'Initial connection',
-        purposeId,
-        metadata: {
-          type: 'mcp',
-          clientId,
-          clientIp: ipAddress,
-          createdAt: new Date().toISOString(),
-        },
-      });
-      this.logger.log(`💾 Session created in PostgreSQL: ${transportSessionId}`);
+      if (existingSessionId) {
+        // Update existing session with new transport info
+        const existingSession = await this.sessionRepository.findBySessionId(existingSessionId);
+        await this.sessionRepository.getRepository().update(
+          { sessionId: existingSessionId },
+          {
+            status: SessionStatus.ACTIVE,
+            lastActivityAt: new Date(),
+            metadata: {
+              ...(existingSession?.metadata || {}),
+              clientId,
+              clientIp: ipAddress,
+              lastConnectedAt: new Date().toISOString(),
+            } as any,
+          },
+        );
+        this.logger.log(`✅ REACTIVATED session: ${existingSessionId}`);
+      } else {
+        // Create new session
+        await this.sessionRepository.create({
+          sessionId: transportSessionId,
+          userId,
+          title: `MCP Session - ${ipAddress}`,
+          metadata: {
+            type: 'mcp',
+            clientId,
+            clientIp: ipAddress,
+            createdAt: new Date().toISOString(),
+          },
+        });
+        this.logger.log(`💾 NEW session created in PostgreSQL: ${transportSessionId}`);
+      }
     } catch (error) {
-      this.logger.error(`Error creating session in DB: ${error.message}`);
+      this.logger.error(`Error creating/updating session in DB: ${error.message}`);
     }
 
     // STEP 4: Store user info in Redis for fast lookups
     try {
-      await this.redisService.set(`session:${transportSessionId}:userId`, userId, 3600);
-      await this.redisService.set(`session:${transportSessionId}:clientId`, clientId || '', 3600);
-      await this.redisService.set(`session:${transportSessionId}:ip`, ipAddress, 3600);
-      await this.redisService.set(`session:${transportSessionId}:purposeId`, purposeId || '', 3600);
-      this.logger.debug(`💾 Session metadata stored in Redis: ${transportSessionId}`);
+      const finalSessionId = existingSessionId || transportSessionId;
+      await this.redisService.set(`session:${finalSessionId}:userId`, userId, 3600);
+      await this.redisService.set(`session:${finalSessionId}:clientId`, clientId || '', 3600);
+      await this.redisService.set(`session:${finalSessionId}:ip`, ipAddress, 3600);
+      
+      // Cache IP -> sessionId mapping
+      await this.redisService.set(`client:ip-${ipAddress}:sessionId`, finalSessionId, 3600);
+      
+      this.logger.debug(`💾 Session metadata stored in Redis: ${finalSessionId}`);
     } catch (error) {
       this.logger.error(`Error storing session metadata in Redis: ${error.message}`);
     }
 
     // Store clientId -> sessionId in Redis for fast lookups (short TTL, 1 hour)
     if (clientId) {
-      await this.redisService.set(`client:${clientId}:sessionId`, transportSessionId, 3600);
+      const finalSessionId = existingSessionId || transportSessionId;
+      await this.redisService.set(`client:${clientId}:sessionId`, finalSessionId, 3600);
     }
 
-    this.logger.log(`✅ MCP: Session created (runtime + PostgreSQL): ${transportSessionId}`);
+    const finalSessionId = existingSessionId || transportSessionId;
+    this.logger.log(`✅ MCP: Session ${existingSessionId ? 'REUSED' : 'CREATED'}: ${finalSessionId}`);
 
     // Cleanup when connection closes
     res.on('close', () => {
       this.closeSession(transportSessionId);
     });
 
-    return { sessionId: transportSessionId, session };
+    return { sessionId: finalSessionId, session };
   }
 
   /**
-   * Creates or gets session for a user when first tool is called
-   * Now session is created immediately on connection, this just updates the purpose
+   * Gets or creates session for a user when first tool is called
+   * Simplified: No longer uses SessionPurpose
    */
   async getOrCreateSessionForToolUse(
     sessionId: string,
@@ -279,15 +282,11 @@ export class McpService {
     const existingDbSession = await this.sessionRepository.findBySessionId(sessionId);
 
     if (existingDbSession) {
-      // Update purpose if needed
-      if (existingDbSession.purposeId) {
-        await this.sessionPurposeRepository.updateLastSession(existingDbSession.purposeId, sessionId);
-      }
       this.logger.debug(`♻️ Session already exists in DB: ${sessionId}`);
       return existingDbSession.sessionId;
     }
 
-    // Fallback: Create session if it doesn't exist (shouldn't happen normally)
+    // Fallback: Session not found (shouldn't happen normally)
     this.logger.warn(`⚠️ Session not found, creating on-the-fly: ${sessionId}`);
     return sessionId;
   }
@@ -319,7 +318,8 @@ export class McpService {
 
   /**
    * Saves a chat message to PostgreSQL
-   * Creates session if it doesn't exist (for conversations)
+   * Creates session if it doesn't exist
+   * Automatically creates/links an issue on first message
    */
   async saveChatMessage(sessionId: string, role: MessageRole, content: string, metadata?: any): Promise<void> {
     try {
@@ -330,25 +330,26 @@ export class McpService {
 
       // Create session if it doesn't exist (first message)
       if (userId) {
-        const createdSessionId = await this.getOrCreateSessionForToolUse(
+        await this.getOrCreateSessionForToolUse(
           sessionId,
           userId,
           'conversation',
           clientId || undefined,
           ipAddress || undefined,
         );
+      }
 
-        // Update purpose's lastSessionId
-        const session = await this.sessionRepository.findBySessionId(createdSessionId);
-        if (session?.purposeId) {
-          await this.sessionPurposeRepository.updateLastSession(session.purposeId, createdSessionId);
-        }
+      // AUTO-CREATE ISSUE on first user message
+      let issueId: string | null = null;
+      if (role === MessageRole.USER && userId) {
+        issueId = await this.getOrCreateIssueForSession(sessionId, userId, content);
       }
 
       await this.sessionRepository.addMessage({
         sessionId,
         role,
         content,
+        issueId: issueId || metadata?.issueId || null,
         metadata,
         tokenCount: content.length,
       });
@@ -358,8 +359,212 @@ export class McpService {
     }
   }
 
+  /**
+   * Automatically creates or gets an issue for the current session
+   * Called on first user message to track conversation context
+   */
+  async getOrCreateIssueForSession(
+    sessionId: string,
+    userId: string,
+    userMessage: string,
+  ): Promise<string | null> {
+    try {
+      // Check if session already has an issue linked
+      const session = await this.sessionRepository.findBySessionId(sessionId);
+      
+      if (session?.issueId) {
+        this.logger.debug(`♻️ Session already has issue: ${session.issueId}`);
+        return session.issueId;
+      }
+
+      // Check Redis for cached issueId
+      const cachedIssueId = await this.redisService.get<string>(`session:${sessionId}:issueId`);
+      if (cachedIssueId) {
+        this.logger.debug(`♻️ Issue found in Redis: ${cachedIssueId}`);
+        return cachedIssueId;
+      }
+
+      // Generate issue title from user message (first 100 chars)
+      const title = userMessage.substring(0, 100) + (userMessage.length > 100 ? '...' : '');
+
+      // Create new issue automatically
+      const issue = await this.issueService.createIssue({
+        title,
+        description: `Auto-created from MCP conversation. Initial message: "${userMessage.substring(0, 200)}"`,
+        userId,
+        sessionId,
+        metadata: {
+          autoCreated: true,
+          source: 'mcp-conversation',
+          createdAt: new Date().toISOString(),
+          initialMessage: userMessage,
+        },
+      });
+
+      // Link issue to session
+      if (session) {
+        await this.sessionRepository.getRepository().update(
+          { sessionId },
+          { issueId: issue.id },
+        );
+        this.logger.log(`🔗 Issue linked to session: ${issue.issueId} -> ${sessionId}`);
+      }
+
+      // Cache in Redis
+      await this.redisService.set(`session:${sessionId}:issueId`, issue.id, 3600);
+      await this.redisService.set(`issue:${issue.id}:sessionId`, sessionId, 3600);
+
+      this.logger.log(`✅ Issue auto-created for conversation: ${issue.issueId} (${title})`);
+
+      return issue.id;
+    } catch (error) {
+      this.logger.error(`Error creating/Getting issue: ${error.message}`);
+      return null;
+    }
+  }
+
   private registerTools(server: McpServer) {
     this.logger.log('🔧 MCP: Registering tools...');
+
+    // chat_with_agents - MAIN TOOL! Routes to specialized agents (PM, Code, Architecture, etc.)
+    server.tool(
+      'chat_with_agents',
+      'Main chat tool - Routes your message to a specialized agent (PM, Code, Architecture, Analysis, etc.). Use this for ALL questions and requests.',
+      {
+        message: z.string().describe('Your question or request'),
+        context: z.any().optional().describe('Additional context (web info, project code, etc.)'),
+      },
+      async ({ message, context }, extra) => {
+        const sessionId = extra?.sessionId || 'unknown';
+        
+        this.logger.log(`💬 MCP: chat_with_agents called - message="${message.substring(0, 100)}..."`);
+        
+        try {
+          // Call the chat endpoint which auto-routes to specialized agents
+          const port = this.apiPort;
+          const url = `http://localhost:${port}/mcp/chat`;
+          
+          const response = await fetch(url, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              input: message,
+              options: { context, sessionId },
+              sessionId,
+            }),
+          });
+          
+          const result = await response.json();
+          
+          if (result.success) {
+            this.logger.log(`✅ MCP: Agent responded - ${result.data?.targetAgent || 'unknown'}`);
+            
+            // Format response with agent info
+            let text = '';
+            
+            if (result.data?.targetAgent) {
+              text += `🤖 **${result.data.targetAgent}** te ayuda:\n\n`;
+            }
+            
+            if (result.data?.message) {
+              text += result.data.message;
+            }
+            
+            // Add routed agent info
+            if (result.data?.routedBy && result.data?.targetAgent) {
+              text += `\n\n---\n*Enrutado por: ${result.data.routedBy} → ${result.data.targetAgent}*`;
+            }
+            
+            // Add relevant rules if any
+            if (result.data?.relevantRules && result.data.relevantRules.length > 0) {
+              text += `\n\n📋 **Reglas aplicadas:** ${result.data.relevantRules.length}\n`;
+              result.data.relevantRules.forEach((r: any, i: number) => {
+                text += `\n${i + 1}. ${r.name} (${r.category})`;
+              });
+            }
+            
+            return { content: [{ type: 'text' as const, text }] };
+          } else {
+            this.logger.error(`❌ MCP: Agent error - ${result.error}`);
+            return { 
+              content: [{ type: 'text' as const, text: `⚠️ Error: ${result.error}` }],
+              isError: true,
+            };
+          }
+        } catch (error) {
+          const msg = error instanceof Error ? error.message : 'Error';
+          this.logger.error(`❌ MCP: chat_with_agents failed - ${msg}`);
+          return { 
+            content: [{ type: 'text' as const, text: `⚠️ Error: ${msg}` }],
+            isError: true,
+          };
+        }
+      },
+    );
+
+    // ask_agent - Alias for chat_with_agents (for backward compatibility)
+    server.tool(
+      'ask_agent',
+      'Ask a question and get help from a specialized agent (PM, Code, Architecture, etc.). This is the MAIN tool for getting help.',
+      {
+        question: z.string().describe('Your question or request'),
+        context: z.any().optional().describe('Additional context (web info, project code, etc.)'),
+      },
+      async ({ question, context }, extra) => {
+        // Same implementation as chat_with_agents
+        const sessionId = extra?.sessionId || 'unknown';
+        
+        this.logger.log(`🤖 MCP: ask_agent called - question="${question.substring(0, 100)}..."`);
+        
+        try {
+          const port = this.apiPort;
+          const url = `http://localhost:${port}/mcp/chat`;
+          
+          const response = await fetch(url, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              input: question,
+              options: { context, sessionId },
+              sessionId,
+            }),
+          });
+          
+          const result = await response.json();
+          
+          if (result.success) {
+            let text = '';
+            if (result.data?.targetAgent) {
+              text += `🤖 **${result.data.targetAgent}** te ayuda:\n\n`;
+            }
+            if (result.data?.message) {
+              text += result.data.message;
+            }
+            if (result.data?.routedBy && result.data?.targetAgent) {
+              text += `\n\n---\n*Enrutado por: ${result.data.routedBy} → ${result.data.targetAgent}*`;
+            }
+            if (result.data?.relevantRules && result.data.relevantRules.length > 0) {
+              text += `\n\n📋 **Reglas aplicadas:** ${result.data.relevantRules.length}\n`;
+              result.data.relevantRules.forEach((r: any, i: number) => {
+                text += `\n${i + 1}. ${r.name} (${r.category})`;
+              });
+            }
+            return { content: [{ type: 'text' as const, text }] };
+          } else {
+            return { 
+              content: [{ type: 'text' as const, text: `⚠️ Error: ${result.error}` }],
+              isError: true,
+            };
+          }
+        } catch (error) {
+          const msg = error instanceof Error ? error.message : 'Error';
+          return { 
+            content: [{ type: 'text' as const, text: `⚠️ Error: ${msg}` }],
+            isError: true,
+          };
+        }
+      },
+    );
 
     // auto_apply_rules - Automatically searches and applies relevant rules to user queries
     server.tool(

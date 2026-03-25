@@ -1,8 +1,11 @@
 /**
  * Session Entity
  *
- * Represents a chat session.
- * Each session belongs to a user and contains multiple messages.
+ * Represents a chat session for a specific issue.
+ * Contains complete conversation history in JSONB field.
+ * 
+ * Hierarchy:
+ * User → Issue → Session (with history)
  */
 
 import {
@@ -12,13 +15,12 @@ import {
   CreateDateColumn,
   UpdateDateColumn,
   ManyToOne,
-  OneToMany,
   JoinColumn,
   Index,
+  OneToMany,
 } from 'typeorm';
 import { User } from '@modules/users/domain/entities/user.entity';
 import { ChatMessage } from './chat-message.entity';
-import { SessionPurpose } from './session-purpose.entity';
 
 export enum SessionStatus {
   ACTIVE = 'active',
@@ -44,6 +46,14 @@ export class Session {
   @Column({ name: 'user_id', nullable: true })
   userId?: string;
 
+  // NEW: Direct FK to Issue (no SessionPurpose intermediary)
+  @Column({ type: 'uuid', name: 'issue_id', nullable: true })
+  @Index()
+  issueId?: string;
+
+  // Note: Don't use @ManyToOne to avoid circular dependency
+  // Use issueId directly or load Issue separately via repository
+
   @Column({ default: SessionStatus.ACTIVE })
   @Index()
   status: SessionStatus;
@@ -51,16 +61,15 @@ export class Session {
   @Column({ nullable: true })
   title?: string;
 
-  @Column({ name: 'purpose', type: 'varchar', nullable: true })
-  purpose?: string | null; // Specific goal/issue for this session (text description)
-
-  @Column({ type: 'uuid', name: 'purpose_id', nullable: true })
-  @Index()
-  purposeId?: string; // Foreign key to session_purposes table
-
-  @ManyToOne(() => SessionPurpose, { nullable: true, onDelete: 'SET NULL' })
-  @JoinColumn({ name: 'purpose_id' })
-  purposeEntity?: SessionPurpose;
+  // DEPRECATED: purpose and purposeEntity removed (replaced by direct issue FK)
+  // OLD: @Column({ name: 'purpose', type: 'varchar', nullable: true })
+  // OLD: purpose?: string | null;
+  
+  // OLD: @Column({ type: 'uuid', name: 'purpose_id', nullable: true })
+  // OLD: purposeId?: string;
+  
+  // OLD: @ManyToOne(() => SessionPurpose, { nullable: true, onDelete: 'SET NULL' })
+  // OLD: purposeEntity?: SessionPurpose;
 
   @Column({ name: 'is_validated', default: false })
   isValidated: boolean; // True after first meaningful interaction

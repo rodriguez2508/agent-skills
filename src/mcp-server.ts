@@ -18,8 +18,33 @@ const server = new Server(
   },
 );
 
+const PORT = process.env.PORT || 8004;
+const API_URL = `http://localhost:${PORT}`;
+
 // Tool Definitions
 const TOOLS = [
+  {
+    name: 'agent_query',
+    description: 'Consulta principal con agentes especializados. Auto-detecta intención y enruta al agente correcto (PMAgent, CodeAgent, SearchAgent, etc.). Crea issues automáticamente y mantiene historial.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        input: {
+          type: 'string',
+          description: 'Tu consulta o petición',
+        },
+        sessionId: {
+          type: 'string',
+          description: 'ID de sesión para mantener historial (opcional)',
+        },
+        userId: {
+          type: 'string',
+          description: 'ID de usuario (opcional)',
+        },
+      },
+      required: ['input'],
+    },
+  },
   {
     name: 'search_rules',
     description: 'Busca reglas de código usando BM25. Devuelve reglas relevantes con el prefijo "Según CodeMentor MCP"',
@@ -90,18 +115,45 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     let result: any;
 
     switch (name) {
+      case 'agent_query': {
+        // Main agent query - uses RouterAgent + specialized agents
+        const input = args?.input as string;
+        const sessionId = args?.sessionId as string | undefined;
+        const userId = args?.userId as string | undefined;
+
+        const session = sessionId || `session-${Date.now()}`;
+
+        const response = await fetch(`${API_URL}/mcp/chat`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            input,
+            sessionId: session,
+            options: { userId },
+          }),
+        });
+
+        if (!response.ok) {
+          throw new Error(`API returned ${response.status}`);
+        }
+
+        const data = await response.json();
+        result = formatAgentResponse(data);
+        break;
+      }
+
       case 'search_rules': {
         const query = args?.query as string;
         const category = args?.category as string | undefined;
         const limit = args?.limit as number | undefined;
-        
+
         const response = await fetch(
-          `http://localhost:3000/rules/search?q=${encodeURIComponent(query)}${
+          `http://localhost:${PORT}/rules/search?q=${encodeURIComponent(query)}${
             category ? `&category=${category}` : ''
           }&limit=${limit || 5}`,
         );
         const data = await response.json();
-        
+
         result = formatCodeMentorResponse('search', data);
         break;
       }
@@ -236,6 +288,92 @@ function formatCodeMentorResponse(type: 'search' | 'get' | 'list', data: any): s
 function truncateContent(content: string, maxLength: number): string {
   if (content.length <= maxLength) return content;
   return content.substring(0, maxLength) + '\n\n*(...contenido truncado...)';
+}
+
+/**
+ * Formats response from agent system with routing info, issues, etc.
+ */
+function formatAgentResponse(data: any): string {
+  const { data: responseData, metadata } = data;
+
+  let text = '';
+
+  // Add main message
+  if (responseData?.message) {
+    text += `${responseData.message}\n\n`;
+  }
+
+  // Add agent routing info
+  if (responseData?.routedBy || responseData?.targetAgent) {
+    text += `---\n🤖 **Agentes involucrados**:\n`;
+    if (responseData.routedBy) {
+      text += `- Router: \`${responseData.routedBy}\`\n`;
+    }
+    if (responseData.targetAgent) {
+      text += `- Especialista: \`${responseData.targetAgent}\`\n`;
+    }
+    text += '\n';
+  }
+
+  // Add issue info (from PMAgent)
+  if (responseData?.issue) {
+    const issue = responseData.issue;
+    text += `---\n📋 **Issue Creado**:\n`;
+    if (issue.issueId) {
+      text += `**ID**: \`${issue.issueId}\`\n`;
+    }
+    if (issue.title) {
+      text += `**Título**: ${issue.title}\n`;
+    }
+    if (issue.userStory) {
+      text += `\n**Historia de Usuario**:\n${issue.userStory}\n`;
+    }
+    if (issue.acceptanceCriteria) {
+      text += `\n**Criterios de Aceptación**:\n${Array.isArray(issue.acceptanceCriteria) ? issue.acceptanceCriteria.join('\n') : issue.acceptanceCriteria}\n`;
+    }
+    if (issue.businessValue) {
+      text += `\n**Valor de Negocio**: ${issue.businessValue}\n`;
+    }
+    if (issue.priority) {
+      text += `\n**Prioridad**: ${issue.priority}\n`;
+    }
+    if (responseData.warning) {
+      text += `\n⚠️ ${responseData.warning}\n`;
+    }
+    if (responseData.nextSteps) {
+      text += `\n**Siguientes Pasos**:\n${responseData.nextSteps.map((s: string) => `- ${s}`).join('\n')}\n`;
+    }
+    text += '\n';
+  }
+
+  // Add user story info
+  if (responseData?.userStory) {
+    text += `---\n📖 **Historia de Usuario**:\n${responseData.userStory.description}\n\n`;
+    if (responseData.userStory.acceptanceCriteria) {
+      text += `**Criterios de Aceptación**:\n${responseData.userStory.acceptanceCriteria.join('\n')}\n\n`;
+    }
+  }
+
+  // Add relevant rules
+  if (responseData?.relevantRules && responseData.relevantRules.length > 0) {
+    text += `---\n📚 **Reglas Aplicadas**:\n`;
+    responseData.relevantRules.forEach((r: any, i: number) => {
+      text += `${i + 1}. **${r.name}** (${r.category} - ${r.impact})\n`;
+    });
+    text += '\n';
+  }
+
+  // Add metadata
+  if (metadata) {
+    if (metadata.executionTime) {
+      text += `⏱️ **Tiempo de ejecución**: ${metadata.executionTime}ms\n`;
+    }
+    if (metadata.role) {
+      text += `🎯 **Rol**: ${metadata.role}\n`;
+    }
+  }
+
+  return text.trim() || '✅ Consulta procesada exitosamente';
 }
 
 // Start Server

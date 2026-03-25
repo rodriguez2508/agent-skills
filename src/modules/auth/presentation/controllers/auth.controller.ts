@@ -26,7 +26,6 @@ import {
   LoginByEmailDto,
   LogoutDto,
   UpdatePreferencesDto,
-  ValidateSessionDto,
 } from '../../presentation/dto/auth.dto';
 
 @ApiTags('Auth')
@@ -177,25 +176,6 @@ export class AuthController {
     return {
       stats,
       message: `${stats.totalSessions} total sessions, ${stats.activeSessions} active, ${stats.totalMessages} messages`,
-    };
-  }
-
-  @Post('sessions/:sessionId/validate')
-  @ApiOperation({ summary: 'Validate a session with a purpose' })
-  @ApiParam({ name: 'sessionId', description: 'Session ID to validate' })
-  @ApiResponse({ status: 200, description: 'Session validated' })
-  @ApiResponse({ status: 404, description: 'Session not found' })
-  async validateSession(
-    @Param('sessionId') sessionId: string,
-    @Body() dto: ValidateSessionDto,
-  ) {
-    this.logger.log(`✅ Validate session request: ${sessionId}`);
-
-    const session = await this.authService.validateSession(sessionId, dto.purpose);
-
-    return {
-      message: 'Session validated successfully',
-      session,
     };
   }
 

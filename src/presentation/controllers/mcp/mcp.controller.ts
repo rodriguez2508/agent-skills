@@ -7,6 +7,7 @@ import { IdentityAgent } from '@agents/identity/identity.agent';
 import { AgentLoggerService } from '@infrastructure/logging/agent-logger.service';
 import { MessageRole } from '@modules/sessions/domain/entities/chat-message.entity';
 import { SSEServerTransport } from '@modelcontextprotocol/sdk/server/sse.js';
+import { RedisService } from '@infrastructure/database/redis/redis.service';
 
 @ApiTags('MCP')
 @Controller('mcp')
@@ -18,6 +19,7 @@ export class McpController {
     private readonly routerAgent: RouterAgent,
     private readonly identityAgent: IdentityAgent,
     private readonly agentLogger: AgentLoggerService,
+    private readonly redisService: RedisService,
   ) {}
 
   @Get('sse')
@@ -123,16 +125,6 @@ export class McpController {
 
     this.logger.log(`💬 MCP Chat: User says "${input.substring(0, 50)}..."`);
 
-    // SAVE USER MESSAGE TO POSTGRESQL
-    if (sessionId) {
-      await this.mcpService.saveChatMessage(
-        sessionId,
-        MessageRole.USER,
-        input,
-        { options },
-      ).catch(err => this.logger.warn(`Error saving message: ${err.message}`));
-    }
-
     // Log start
     this.agentLogger.info('MCP-Controller', '📥 User message received', {
       input: input.substring(0, 100),
@@ -140,10 +132,20 @@ export class McpController {
       sessionId,
     });
 
+    // SAVE USER MESSAGE TO POSTGRESQL FIRST
+    if (sessionId) {
+      await this.mcpService.saveChatMessage(
+        sessionId,
+        MessageRole.USER,
+        input,
+        { options },
+      ).catch(err => this.logger.warn(`Error saving user message: ${err.message}`));
+    }
+
     try {
       // AUTO-SEARCH RELEVANT RULES FIRST (before routing)
       const relevantRules = await this.searchRelevantRules(input);
-      
+
       this.agentLogger.info('MCP-Controller', '📚 Rules found', {
         count: relevantRules.length,
         rules: relevantRules.map(r => r.name),
@@ -155,8 +157,8 @@ export class McpController {
       }
 
       // LOAD PREVIOUS RULES CONTEXT from Redis (for conversation continuity)
-      const previousRulesContext = sessionId 
-        ? await this.loadRulesContextFromRedis(sessionId) 
+      const previousRulesContext = sessionId
+        ? await this.loadRulesContextFromRedis(sessionId)
         : '';
 
       // Add rules context to options
@@ -170,11 +172,16 @@ export class McpController {
       this.agentLogger.info('RouterAgent', '🔄 Activating RouterAgent with rules context', {
         inputLength: input.length,
         rulesCount: relevantRules.length,
+        sessionId,
       });
 
       const response = await this.routerAgent.execute({
         input,
-        options: optionsWithRules,
+        options: {
+          ...optionsWithRules,
+          sessionId,
+          userId: await this.redisService.get(`session:${sessionId}:userId`),
+        },
       });
 
       // SAVE RESPONSE TO POSTGRESQL with rules metadata
@@ -195,11 +202,15 @@ export class McpController {
         await this.updateSessionWithRulesContext(sessionId, relevantRules);
       }
 
+      // GET ISSUE INFO for response (auto-created or linked)
+      const issueInfo = sessionId ? await this.getIssueInfoForSession(sessionId) : null;
+
       // Log response
       this.agentLogger.info('MCP-Controller', '✅ Response generated', {
         success: response.success,
         executionTime: response.metadata?.executionTime,
         rulesApplied: relevantRules.length,
+        issueId: issueInfo?.id,
       });
 
       return {
@@ -208,6 +219,7 @@ export class McpController {
           ...response.data,
           relevantRules: relevantRules.length > 0 ? relevantRules : undefined,
           rulesContext: relevantRules.length > 0 ? this.formatRulesContext(relevantRules) : undefined,
+          issue: issueInfo,
         },
         error: response.error,
         metadata: response.metadata,
@@ -324,27 +336,6 @@ export class McpController {
       );
       
       this.logger.debug(`📝 Session updated with rules context: ${sessionId}`);
-      
-      // Also update purpose if exists
-      if (session.purposeId) {
-        const purpose = await this.mcpService['sessionPurposeRepository'].getRepository().findOne({
-          where: { id: session.purposeId },
-        });
-        
-        if (purpose) {
-          const updatedPurposeMetadata: any = {
-            ...purpose.metadata,
-            lastAppliedRules: rules.map(r => r.id),
-            appliedRulesSession: sessionId,
-            lastUpdatedAt: new Date(),
-          };
-          
-          await this.mcpService['sessionPurposeRepository'].getRepository().update(
-            { id: session.purposeId },
-            { metadata: updatedPurposeMetadata as any },
-          );
-        }
-      }
     } catch (error) {
       this.logger.warn(`Failed to update session with rules: ${error instanceof Error ? error.message : error}`);
     }
@@ -365,6 +356,61 @@ export class McpController {
     return context;
   }
 
+  /**
+   * Gets issue info for a session
+   */
+  private async getIssueInfoForSession(sessionId: string): Promise<any> {
+    try {
+      // Check Redis first
+      const issueId = await this.mcpService['redisService'].get<string>(`session:${sessionId}:issueId`);
+      
+      if (!issueId) {
+        // Check session in DB
+        const session = await this.mcpService['sessionRepository'].findBySessionId(sessionId);
+        if (!session?.issueId) return null;
+        
+        // Use issueRepository directly
+        const issue = await this.mcpService['sessionRepository']['getRepository']().manager
+          .getRepository('issues')
+          .findOne({ where: { id: session.issueId } });
+        
+        if (!issue) {
+          return {
+            id: session.issueId,
+            sessionId,
+            autoCreated: true,
+          };
+        }
+        
+        return {
+          id: issue.id,
+          issueId: issue.issueId || session.issueId,
+          title: issue.title,
+          status: issue.status,
+          sessionId,
+          autoCreated: issue.metadata?.autoCreated || false,
+        };
+      }
+
+      // Get issue from DB using IssueService
+      const issue = await this.mcpService['issueService'].getIssueById(issueId);
+      
+      if (!issue) return null;
+
+      return {
+        id: issue.id,
+        issueId: issue.issueId,
+        title: issue.title,
+        status: issue.status,
+        sessionId,
+        autoCreated: issue.metadata?.autoCreated || false,
+      };
+    } catch (error) {
+      this.logger.warn(`Error getting issue info: ${error.message}`);
+      return null;
+    }
+  }
+
   @Get('logs')
   @ApiOperation({ summary: 'Get recent agent logs' })
   getLogs(@Query('count') count?: number) {
@@ -378,28 +424,12 @@ export class McpController {
     };
   }
 
-  @Get('agents')
-  @ApiOperation({ summary: 'List registered agents' })
-  getAgents() {
-    const agents = this.routerAgent['agentRegistry'].listAgents();
-    const stats = this.agentLogger.getAgentStats();
-
-    return {
-      agents: agents.map((a) => ({
-        id: a.agentId,
-        description: a.description,
-        logs: stats[a.agentId]?.total || 0,
-      })),
-      total: agents.length,
-    };
-  }
-
   @Get('debug')
-  @ApiOperation({ summary: 'Debug MCP sessions and tools' })
+  @ApiOperation({ summary: 'Debug MCP sessions, tools, and agents' })
   getDebug() {
     const sessions = this.mcpService.getSessions();
     const agents = this.routerAgent['agentRegistry'].listAgents();
-    
+
     return {
       sessions: {
         count: sessions.size,
@@ -407,14 +437,41 @@ export class McpController {
       },
       agents: {
         count: agents.length,
-        ids: agents.map(a => a.agentId),
+        list: agents.map(a => ({
+          id: a.agentId,
+          description: a.description,
+        })),
+        registered: this.routerAgent['agentRegistry'].getAgentIds(),
       },
       tools: [
         { name: 'search_rules', description: 'Busca reglas de código' },
         { name: 'get_rule', description: 'Obtiene regla por ID' },
         { name: 'list_rules', description: 'Lista reglas disponibles' },
+        { name: 'auto_apply_rules', description: 'Auto-aplica reglas a tu consulta' },
       ],
+      endpoints: {
+        chat: 'POST /mcp/chat - Chat with agents (auto-routes to specialist)',
+        sse: 'GET /mcp/sse - MCP SSE connection',
+        message: 'POST /mcp/message - MCP protocol messages',
+      },
       timestamp: new Date().toISOString(),
+    };
+  }
+
+  @Get('agents')
+  @ApiOperation({ summary: 'List all registered agents' })
+  getAgents() {
+    const agents = this.routerAgent['agentRegistry'].listAgents();
+    const stats = this.agentLogger.getAgentStats();
+
+    return {
+      total: agents.length,
+      agents: agents.map((a) => ({
+        id: a.agentId,
+        description: a.description,
+        logs: stats[a.agentId]?.total || 0,
+      })),
+      usage: stats,
     };
   }
 }

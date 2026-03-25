@@ -33,7 +33,7 @@ import { CodeAgent } from '@agents/code/code.agent';
 import { ArchitectureAgent } from '@agents/architecture/architecture.agent';
 import { AnalysisAgent } from '@agents/analysis/analysis.agent';
 import { MetricsAgent } from '@agents/metrics/metrics.agent';
-import { IssueWorkflowAgent } from '@agents/issue-workflow/issue-workflow.agent';
+import { PMAgent } from '@agents/pm/pm.agent';
 
 // Domain
 import { RULE_REPOSITORY } from '@core/domain/ports/rule-repository.token';
@@ -93,7 +93,7 @@ import { IpTrackerMiddleware } from '@shared/middleware/ip-tracker.middleware';
     ArchitectureAgent,
     AnalysisAgent,
     MetricsAgent,
-    IssueWorkflowAgent,
+    PMAgent,
 
     // CQRS Handlers
     SearchRulesHandler,
@@ -115,7 +115,7 @@ export class AppModule implements OnModuleInit {
     private readonly architectureAgent: ArchitectureAgent,
     private readonly analysisAgent: AnalysisAgent,
     private readonly metricsAgent: MetricsAgent,
-    private readonly issueWorkflowAgent: IssueWorkflowAgent,
+    private readonly pmAgent: PMAgent,
     private readonly rulesEngine: RulesEngine,
   ) {}
 
@@ -131,7 +131,7 @@ export class AppModule implements OnModuleInit {
     this.agentRegistry.register(this.architectureAgent);
     this.agentRegistry.register(this.analysisAgent);
     this.agentRegistry.register(this.metricsAgent);
-    this.agentRegistry.register(this.issueWorkflowAgent);
+    this.agentRegistry.register(this.pmAgent);
 
     // Register agents in the router
     this.routerAgent.registerAllAgents();

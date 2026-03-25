@@ -205,15 +205,6 @@ export class AuthService {
   }
 
   /**
-   * Validate a session with a purpose
-   */
-  async validateSession(sessionId: string, purpose: string): Promise<any> {
-    const session = await this.sessionRepository.updatePurpose(sessionId, purpose);
-    this.logger.log(`✅ Session validated: ${sessionId} - Purpose: ${purpose}`);
-    return session;
-  }
-
-  /**
    * Invalidate a session
    */
   async invalidateSession(sessionId: string, reason?: string): Promise<any> {

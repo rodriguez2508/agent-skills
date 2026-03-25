@@ -55,6 +55,7 @@ export class RouterAgent extends BaseAgent {
 
     this.agentLogger.info(this.agentId, `🧠 [ROUTER] Intención detectada: ${intention}`, {
       confidence: 'high',
+      inputPreview: request.input.substring(0, 50),
     });
 
     // Encontrar agente especializado
@@ -73,7 +74,9 @@ export class RouterAgent extends BaseAgent {
             "- Searching code rules (Clean Architecture, CQRS, NestJS)\n" +
             "- Generating code\n" +
             "- Explaining architecture patterns\n" +
-            "- Analyzing code quality",
+            "- Analyzing code quality\n" +
+            "- Product Management (creating issues, user stories)\n" +
+            "- Issue workflow tracking",
           intention,
           availableAgents: this.agentRegistry.getAgentIds(),
           relevantRules: relevantRules.length > 0 ? relevantRules : undefined,
@@ -161,7 +164,18 @@ export class RouterAgent extends BaseAgent {
   private detectIntention(input: string): string {
     const lowerInput = input.toLowerCase();
 
-    // Patrones de issues/workflow (PRIORIDAD ALTA)
+    // Patrones de Product Management (PRIORIDAD ALTA)
+    if (this.matchesPattern(lowerInput, [
+      'crear issue', 'crear ticket', 'issue para', 'ticket para',
+      'historia de usuario', 'user story', 'como usuario', 'as a user',
+      'criterios de aceptación', 'acceptance criteria',
+      'prd', 'product requirements', 'documento de producto',
+      'producto', 'product manager', 'pm', 'valor de negocio'
+    ])) {
+      return 'pm';
+    }
+
+    // Patrones de issues/workflow
     if (this.matchesPattern(lowerInput, [
       'issue', 'ticket', 'tarea', 'task', 'problema', 'bug', 
       'feature', 'historia', 'story', 'commit', 'pull request', 
@@ -222,6 +236,7 @@ export class RouterAgent extends BaseAgent {
       'identity': 'IdentityAgent',
       'metrics': 'MetricsAgent',
       'issue-workflow': 'IssueWorkflowAgent',
+      'pm': 'PMAgent',
     };
 
     const targetAgentId = agentMap[intention];

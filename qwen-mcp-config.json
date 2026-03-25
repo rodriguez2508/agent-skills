@@ -1,9 +1,26 @@
 {
+  "mcp": {
+    "enabled": true,
+    "autoActivateSkills": true,
+    "preferMcpOverInternalTools": true,
+    "defaultTool": "agent_query",
+    "toolPriority": {
+      "agent_query": "high",
+      "search_rules": "medium",
+      "get_rule": "low",
+      "list_rules": "low"
+    }
+  },
   "mcpServers": {
     "agent-skills-api": {
       "url": "http://localhost:8004/mcp/sse",
       "trust": true,
       "priority": "high"
     }
+  },
+  "instructions": {
+    "defaultBehavior": "Use 'agent_query' tool for ALL user requests. This tool automatically routes to specialized agents (PMAgent, CodeAgent, SearchAgent, etc.) and creates issues when needed.",
+    "pmRequests": "When user asks to create issues, user stories, or requirements, the agent_query tool will automatically invoke PMAgent which creates issues in the database.",
+    "sessionManagement": "Always pass sessionId to maintain conversation history and context across messages."
   }
 }

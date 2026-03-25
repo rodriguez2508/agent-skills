@@ -13,7 +13,6 @@ import { createTypeORMConfig } from './typeorm.config';
 import { User } from '@modules/users/domain/entities/user.entity';
 import { Session } from '@modules/sessions/domain/entities/session.entity';
 import { ChatMessage } from '@modules/sessions/domain/entities/chat-message.entity';
-import { SessionPurpose } from '@modules/sessions/domain/entities/session-purpose.entity';
 
 @Module({
   imports: [
@@ -22,7 +21,7 @@ import { SessionPurpose } from '@modules/sessions/domain/entities/session-purpos
       inject: [ConfigService],
       useFactory: createTypeORMConfig,
     }),
-    TypeOrmModule.forFeature([User, Session, ChatMessage, SessionPurpose]),
+    TypeOrmModule.forFeature([User, Session, ChatMessage]),
   ],
   exports: [TypeOrmModule],
 })

@@ -40,9 +40,8 @@ export class SessionRepository implements ISessionRepository {
     const session = this.repository.create({
       sessionId: data.sessionId,
       userId: data.userId || undefined,
+      issueId: (data as any).issueId || undefined, // Will be added to CreateSessionDto later
       title: data.title,
-      purpose: data.purpose || undefined,
-      purposeId: data.purposeId || undefined,
       isValidated: false,
       metadata: data.metadata,
       status: SessionStatus.ACTIVE,
@@ -51,7 +50,7 @@ export class SessionRepository implements ISessionRepository {
     });
 
     const saved = await this.repository.save(session);
-    this.logger.debug(`📝 Session created: ${saved.id} (purposeId: ${data.purposeId || 'none'})`);
+    this.logger.debug(`📝 Session created: ${saved.id}`);
     return saved;
   }
 
@@ -145,6 +144,7 @@ export class SessionRepository implements ISessionRepository {
     sessionId: string;
     role: MessageRole;
     content: string;
+    issueId?: string; // NEW: Link message to specific issue
     metadata?: any;
     tokenCount?: number;
   }): Promise<ChatMessage> {
@@ -167,12 +167,17 @@ export class SessionRepository implements ISessionRepository {
       tokenCount: data.tokenCount || 0,
     });
 
+    // Set issueId separately to avoid type issues
+    if (data.issueId) {
+      message.issueId = data.issueId;
+    }
+
     const saved = await this.messageRepository.save(message);
 
     // Update session counters
     session.messageCount += 1;
     session.lastActivityAt = new Date();
-    
+
     // Validate session on first message (first meaningful interaction)
     if (!session.isValidated) {
       session.isValidated = true;
@@ -244,21 +249,6 @@ export class SessionRepository implements ISessionRepository {
     }
 
     this.logger.debug(`⏰ Session expired: ${sessionId}`);
-    return updated;
-  }
-
-  /**
-   * Update session purpose
-   */
-  async updatePurpose(sessionId: string, purpose: string): Promise<Session> {
-    await this.repository.update({ sessionId }, { purpose });
-    const updated = await this.findBySessionId(sessionId);
-
-    if (!updated) {
-      throw new Error(`Session not found: ${sessionId}`);
-    }
-
-    this.logger.debug(`🎯 Session purpose updated: ${purpose}`);
     return updated;
   }
 

@@ -213,9 +213,18 @@ git commit -m "feat(auth): add login endpoint"
 git push origin feature/ISSUE-123-user-authentication
 ```
 
-### Step 8: Create PR.md
+### Step 8: Create PR.md (DO NOT COMMIT!)
 
-**Create `PR.md` documenting changes:**
+**Create `PR.md` documenting changes - THIS FILE IS TEMPORARY, DO NOT COMMIT!**
+
+⚠️ **IMPORTANT:** `PR.md` is **ONLY** used as body when creating the PR on GitHub/GitLab. **NEVER commit this file!**
+
+**When user says "sube la rama y crea pr":**
+1. ✅ Push the branch: `git push origin <branch-name>`
+2. ✅ Read PR.md content
+3. ✅ Open GitHub/GitLab in browser OR use `gh pr create --body-file PR.md`
+4. ❌ **DO NOT** run: `git add PR.md && git commit -m "docs: add PR description"`
+5. ❌ **DO NOT** commit PR.md at all!
 
 ```markdown
 # Pull Request: Issue #123 - User Authentication
@@ -261,32 +270,70 @@ Implements user authentication with JWT tokens including login, token refresh, a
 - [ ] Merge to main
 ```
 
-### Step 9: Create Pull Request
+### Step 9: Push and Create PR
 
-**PR Description template:**
+**Push your changes and create the PR on GitHub/GitLab:**
 
-```markdown
-## Description
-This PR implements user authentication with JWT tokens.
+```bash
+# Push branch to remote
+git push origin feature/ISSUE-123-user-authentication
 
-## Type of Change
-- [x] New feature
-- [ ] Bug fix
-- [ ] Breaking change
-- [ ] Documentation update
+# Copy PR.md content
+cat PR.md
 
-## Checklist
-- [x] Code follows project guidelines
-- [x] Self-review completed
-- [x] Tests added/updated
-- [x] Documentation updated
-- [x] No new warnings
-- [x] Issue linked
-
-## Related Issues
-- Closes #123
-- Blocks #130 (user profile)
+# Open GitHub/GitLab in browser
+# Navigate to: https://github.com/OWNER/REPO/pulls
+# Click "New Pull Request"
+# Select your branch: feature/ISSUE-123-user-authentication
+# Paste PR.md content in the description
+# Create Pull Request
 ```
+
+⚠️ **DO NOT run these commands:**
+```bash
+# ❌ WRONG - Don't commit PR.md!
+git add PR.md && git commit -m "docs: add PR description"
+
+# ❌ WRONG - Don't push PR.md!
+git push origin feature/ISSUE-123
+```
+
+✅ **CORRECT workflow:**
+```bash
+# 1. Push your code changes (already committed)
+git push origin feature/ISSUE-123
+
+# 2. Read PR.md for reference
+cat PR.md
+
+# 3. Open GitHub/GitLab in browser
+# 4. Create PR manually
+# 5. Paste PR.md content as description
+# 6. Delete PR.md locally (optional, it's temporary)
+rm PR.md
+```
+
+**Alternative: Using gh CLI**
+```bash
+# Push branch
+git push origin feature/ISSUE-123
+
+# Create PR using PR.md as body
+# IMPORTANT: Always use --base development (NOT main!)
+gh pr create \
+  --title "feat: Issue #123 - User Authentication" \
+  --body-file PR.md \
+  --head feature/ISSUE-123-user-authentication \
+  --base development
+
+# PR.md is still temporary, you can delete it after creating PR
+rm PR.md
+```
+
+⚠️ **IMPORTANT:** 
+- **NEVER** use `--base main` or `--base master`
+- **ALWAYS** use `--base development` (or your team's integration branch)
+- Main/master branches are protected and should only receive merged PRs
 
 ## Session Tracking
 
@@ -315,6 +362,56 @@ This PR implements user authentication with JWT tokens.
   "sessionStart": "2026-03-23T10:00:00Z",
   "sessionEnd": "2026-03-23T11:30:00Z"
 }
+```
+
+## Example: "Sube la rama y crea PR"
+
+**When user says:** "Sube la rama y crea PR"
+
+**DO:**
+```bash
+# 1. Verify current branch
+git branch --show-current
+# Output: feature/ISSUE-123-user-authentication ✓
+
+# 2. Push branch to remote
+git push origin feature/ISSUE-123-user-authentication
+
+# 3. Read PR.md for reference
+cat PR.md
+
+# 4. Create PR on GitHub/GitLab
+# Option A: Using gh CLI (RECOMMENDED)
+gh pr create \
+  --title "feat: Issue #123 - User Authentication" \
+  --body-file PR.md \
+  --head feature/ISSUE-123-user-authentication \
+  --base development
+
+# Option B: Manual in browser
+# - Open: https://github.com/OWNER/REPO/pulls
+# - Click "New Pull Request"
+# - Select base: development
+# - Select head: feature/ISSUE-123-user-authentication
+# - Paste PR.md content as description
+# - Create Pull Request
+
+# 5. Update session tracking
+# - workflowStep: "9_CREATE_PR" ✓
+# - prUrl: "https://github.com/OWNER/REPO/pull/456"
+# - status: "completed"
+```
+
+**DON'T:**
+```bash
+# ❌ NEVER commit PR.md!
+git add PR.md && git commit -m "docs: add PR description"
+
+# ❌ NEVER use --base main!
+gh pr create --base main  # WRONG!
+
+# ❌ NEVER push to main directly!
+git checkout main && git push  # WRONG!
 ```
 
 ## Resume Across Sessions

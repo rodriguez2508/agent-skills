@@ -5,6 +5,7 @@ import express from 'express';
 import { z } from 'zod';
 
 const PORT = process.env.PORT || 8004;
+const API_URL = `http://localhost:${PORT}`;
 
 // Crear servidor MCP
 const server = new McpServer(
@@ -18,6 +19,67 @@ const server = new McpServer(
     },
   },
 );
+
+// ============================================================================
+// PRINCIPAL HERRAMIENTA: agent_query - Usa el sistema completo de agentes
+// ============================================================================
+server.tool(
+  'agent_query',
+  'Consulta principal con agentes especializados. Auto-detecta intención y enruta al agente correcto (PMAgent, CodeAgent, SearchAgent, etc.). Crea issues automáticamente y mantiene historial.',
+  {
+    input: z.string().describe('Tu consulta o petición'),
+    sessionId: z.string().optional().describe('ID de sesión para mantener historial (opcional)'),
+    userId: z.string().optional().describe('ID de usuario (opcional)'),
+  },
+  async ({ input, sessionId, userId }) => {
+    try {
+      // Generate sessionId if not provided (for session continuity)
+      const session = sessionId || `session-${Date.now()}`;
+
+      const url = `${API_URL}/mcp/chat`;
+
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          input,
+          sessionId: session,
+          options: { userId },
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error(`API returned ${response.status}`);
+      }
+
+      const data = await response.json();
+
+      // Format response with agent routing info
+      let text = '';
+
+      if (data.success) {
+        text = formatAgentResponse(data);
+      } else {
+        text = `⚠️ **Error**: ${data.error || 'Error desconocido'}\n\n${data.logs ? `Logs:\n${JSON.stringify(data.logs, null, 2)}` : ''}`;
+      }
+
+      return {
+        content: [{ type: 'text' as const, text }],
+        isError: !data.success,
+      };
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : 'Error';
+      return {
+        content: [{ type: 'text' as const, text: `⚠️ 🎓 Según CodeMentor MCP: ${msg}` }],
+        isError: true,
+      };
+    }
+  },
+);
+
+// ============================================================================
+// HERRAMIENTAS LEGACY: Búsqueda directa de reglas (para compatibilidad)
+// ============================================================================
 
 // Registrar herramienta: search_rules
 server.tool(
@@ -33,10 +95,10 @@ server.tool(
       const url = `http://localhost:${PORT}/rules/search?q=${encodeURIComponent(query)}${
         category ? `&category=${category}` : ''
       }&limit=${limit || 5}`;
-      
+
       const response = await fetch(url);
       const data = await response.json();
-      
+
       const text = formatCodeMentorResponse('search', data);
       return { content: [{ type: 'text' as const, text }] };
     } catch (error) {
@@ -155,4 +217,90 @@ function formatCodeMentorResponse(type: 'search' | 'get' | 'list', data: any): s
   }
   
   return `${prefix}: ${JSON.stringify(data, null, 2)}`;
+}
+
+/**
+ * Formats response from agent system with routing info, issues, etc.
+ */
+function formatAgentResponse(data: any): string {
+  const { data: responseData, metadata } = data;
+
+  let text = '';
+
+  // Add main message
+  if (responseData?.message) {
+    text += `${responseData.message}\n\n`;
+  }
+
+  // Add agent routing info
+  if (responseData?.routedBy || responseData?.targetAgent) {
+    text += `---\n🤖 **Agentes involucrados**:\n`;
+    if (responseData.routedBy) {
+      text += `- Router: \`${responseData.routedBy}\`\n`;
+    }
+    if (responseData.targetAgent) {
+      text += `- Especialista: \`${responseData.targetAgent}\`\n`;
+    }
+    text += '\n';
+  }
+
+  // Add issue info (from PMAgent)
+  if (responseData?.issue) {
+    const issue = responseData.issue;
+    text += `---\n📋 **Issue Creado**:\n`;
+    if (issue.issueId) {
+      text += `**ID**: \`${issue.issueId}\`\n`;
+    }
+    if (issue.title) {
+      text += `**Título**: ${issue.title}\n`;
+    }
+    if (issue.userStory) {
+      text += `\n**Historia de Usuario**:\n${issue.userStory}\n`;
+    }
+    if (issue.acceptanceCriteria) {
+      text += `\n**Criterios de Aceptación**:\n${Array.isArray(issue.acceptanceCriteria) ? issue.acceptanceCriteria.join('\n') : issue.acceptanceCriteria}\n`;
+    }
+    if (issue.businessValue) {
+      text += `\n**Valor de Negocio**: ${issue.businessValue}\n`;
+    }
+    if (issue.priority) {
+      text += `\n**Prioridad**: ${issue.priority}\n`;
+    }
+    if (responseData.warning) {
+      text += `\n⚠️ ${responseData.warning}\n`;
+    }
+    if (responseData.nextSteps) {
+      text += `\n**Siguientes Pasos**:\n${responseData.nextSteps.map((s: string) => `- ${s}`).join('\n')}\n`;
+    }
+    text += '\n';
+  }
+
+  // Add user story info
+  if (responseData?.userStory) {
+    text += `---\n📖 **Historia de Usuario**:\n${responseData.userStory.description}\n\n`;
+    if (responseData.userStory.acceptanceCriteria) {
+      text += `**Criterios de Aceptación**:\n${responseData.userStory.acceptanceCriteria.join('\n')}\n\n`;
+    }
+  }
+
+  // Add relevant rules
+  if (responseData?.relevantRules && responseData.relevantRules.length > 0) {
+    text += `---\n📚 **Reglas Aplicadas**:\n`;
+    responseData.relevantRules.forEach((r: any, i: number) => {
+      text += `${i + 1}. **${r.name}** (${r.category} - ${r.impact})\n`;
+    });
+    text += '\n';
+  }
+
+  // Add metadata
+  if (metadata) {
+    if (metadata.executionTime) {
+      text += `⏱️ **Tiempo de ejecución**: ${metadata.executionTime}ms\n`;
+    }
+    if (metadata.role) {
+      text += `🎯 **Rol**: ${metadata.role}\n`;
+    }
+  }
+
+  return text.trim() || '✅ Consulta procesada exitosamente';
 }
