@@ -274,6 +274,15 @@ Implements user authentication with JWT tokens including login, token refresh, a
 
 **Push your changes and create the PR on GitHub/GitLab:**
 
+⚠️ **CRITICAL: BRANCH BASE CONFIGURATION**
+
+| Repository | Base Branch | Command |
+|------------|-------------|---------|
+| **ThreefacesGroup/** | `development` | `--base development` |
+| Other repos | Check team config | `--base <team-branch>` |
+
+**For ThreefacesGroup repositories (MOST COMMON):**
+
 ```bash
 # Push branch to remote
 git push origin feature/ISSUE-123-user-authentication
@@ -314,12 +323,15 @@ rm PR.md
 ```
 
 **Alternative: Using gh CLI**
+
+⚠️ **CRITICAL FOR THREEFACESGROUP:**
+
 ```bash
 # Push branch
 git push origin feature/ISSUE-123
 
 # Create PR using PR.md as body
-# IMPORTANT: Always use --base development (NOT main!)
+# 🚨 THREEFACESGROUP: ALWAYS use --base development!
 gh pr create \
   --title "feat: Issue #123 - User Authentication" \
   --body-file PR.md \
@@ -330,10 +342,16 @@ gh pr create \
 rm PR.md
 ```
 
-⚠️ **IMPORTANT:** 
-- **NEVER** use `--base main` or `--base master`
-- **ALWAYS** use `--base development` (or your team's integration branch)
-- Main/master branches are protected and should only receive merged PRs
+⚠️ **CRITICAL WARNINGS:**
+
+| Rule | Priority | Description |
+|------|----------|-------------|
+| **NEVER** use `--base main` | 🔴 CRITICAL | Main is protected, PR will be rejected |
+| **NEVER** use `--base master` | 🔴 CRITICAL | Master is protected, PR will be rejected |
+| **ALWAYS** use `--base development` | 🔴 CRITICAL | Default integration branch for ThreefacesGroup |
+| **ALWAYS** write PR.md in **Spanish** | 🔴 CRITICAL | Team language requirement |
+
+**Main/master branches are protected and should only receive merged PRs from development.**
 
 ## Session Tracking
 
