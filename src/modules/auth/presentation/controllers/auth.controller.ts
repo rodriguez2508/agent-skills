@@ -18,15 +18,24 @@ import {
   Logger,
   HttpCode,
   HttpStatus,
+  UseGuards,
 } from '@nestjs/common';
-import { ApiTags, ApiOperation, ApiResponse, ApiParam } from '@nestjs/swagger';
+import { ApiTags, ApiOperation, ApiResponse, ApiParam, ApiBearerAuth } from '@nestjs/swagger';
 import { AuthService } from '../../application/services/auth.service';
 import {
   RegisterOrLoginDto,
   LoginByEmailDto,
   LogoutDto,
   UpdatePreferencesDto,
-} from '../../presentation/dto/auth.dto';
+  RegisterWithPasswordDto,
+  LoginWithPasswordDto,
+  VerifyEmailDto,
+  RequestPasswordResetDto,
+  ResetPasswordDto,
+  ChangePasswordDto,
+} from '../../dto/auth.dto';
+import { AuthGuard } from '../../guards/auth.guard';
+import { User } from '../../decorators/user.decorator';
 
 @ApiTags('Auth')
 @Controller('auth')
@@ -67,6 +76,58 @@ export class AuthController {
     };
   }
 
+  @Post('register/password')
+  @ApiOperation({
+    summary: 'Register user with email and password',
+    description:
+      'Creates a new user with email and password. Sends verification email.',
+  })
+  @ApiResponse({
+    status: 201,
+    description: 'User registered successfully. Verification email sent.',
+  })
+  @ApiResponse({ status: 400, description: 'User with this email already exists' })
+  async registerWithPassword(
+    @Body() dto: RegisterWithPasswordDto,
+    @Ip() ipAddress: string,
+  ) {
+    this.logger.log(`🔐 Register with password request from IP: ${ipAddress}`);
+
+    const result = await this.authService.registerWithPassword({
+      ...dto,
+      ipAddress,
+    });
+
+    return {
+      message: 'User registered successfully. Please check your email to verify your account.',
+      ...result,
+    };
+  }
+
+  @Post('login/password')
+  @ApiOperation({
+    summary: 'Login user with email and password',
+    description: 'Authenticates an existing user with email and password.',
+  })
+  @ApiResponse({ status: 200, description: 'User logged in successfully' })
+  @ApiResponse({ status: 401, description: 'Invalid email or password' })
+  async loginWithPassword(
+    @Body() dto: LoginWithPasswordDto,
+    @Ip() ipAddress: string,
+  ) {
+    this.logger.log(`🔐 Login with password request from IP: ${ipAddress}`);
+
+    const result = await this.authService.loginWithPassword({
+      ...dto,
+      ipAddress,
+    });
+
+    return {
+      message: 'User logged in successfully',
+      ...result,
+    };
+  }
+
   @Post('login')
   @ApiOperation({
     summary: 'Login user by email',
@@ -89,6 +150,53 @@ export class AuthController {
     };
   }
 
+  @Post('verify-email')
+  @ApiOperation({
+    summary: 'Verify email with token',
+    description: 'Verifies user email using the token sent via email.',
+  })
+  @ApiResponse({ status: 200, description: 'Email verified successfully' })
+  @ApiResponse({ status: 400, description: 'Invalid or expired token' })
+  async verifyEmail(@Body() dto: VerifyEmailDto) {
+    this.logger.log(`📧 Email verification request`);
+
+    const result = await this.authService.verifyEmail(dto.token);
+
+    return result;
+  }
+
+  @Post('password/reset/request')
+  @ApiOperation({
+    summary: 'Request password reset',
+    description: 'Sends a password reset email to the user.',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Password reset email sent (if email exists)',
+  })
+  async requestPasswordReset(@Body() dto: RequestPasswordResetDto) {
+    this.logger.log(`🔑 Password reset request for: ${dto.email}`);
+
+    const result = await this.authService.requestPasswordReset(dto);
+
+    return result;
+  }
+
+  @Post('password/reset')
+  @ApiOperation({
+    summary: 'Reset password with token',
+    description: 'Resets user password using the token sent via email.',
+  })
+  @ApiResponse({ status: 200, description: 'Password reset successfully' })
+  @ApiResponse({ status: 400, description: 'Invalid or expired token' })
+  async resetPassword(@Body() dto: ResetPasswordDto) {
+    this.logger.log(`🔐 Password reset with token`);
+
+    const result = await this.authService.resetPassword(dto);
+
+    return result;
+  }
+
   @Post('logout')
   @ApiOperation({ summary: 'Logout user' })
   @ApiResponse({ status: 200, description: 'User logged out successfully' })
@@ -102,19 +210,11 @@ export class AuthController {
   }
 
   @Get('me')
+  @UseGuards(AuthGuard)
   @ApiOperation({ summary: 'Get current user info' })
   @ApiResponse({ status: 200, description: 'User info retrieved' })
-  async getCurrentUser(@Headers('x-session-id') sessionId: string) {
-    if (!sessionId) {
-      return { error: 'Session ID required in x-session-id header' };
-    }
-
-    const user = await this.authService.getUserBySessionId(sessionId);
-
-    if (!user) {
-      return { error: 'User not found for this session' };
-    }
-
+  @ApiBearerAuth('x-session-id')
+  async getCurrentUser(@User() user: any) {
     return { user };
   }
 
@@ -153,6 +253,30 @@ export class AuthController {
     const user = await this.authService.updatePreferences(userId, dto);
 
     return { message: 'Preferences updated successfully', user };
+  }
+
+  @Post('password/change')
+  @UseGuards(AuthGuard)
+  @ApiOperation({
+    summary: 'Change password (authenticated)',
+    description: 'Changes password for authenticated user.',
+  })
+  @ApiResponse({ status: 200, description: 'Password changed successfully' })
+  @ApiResponse({ status: 401, description: 'Unauthorized' })
+  @ApiResponse({ status: 400, description: 'Current password is incorrect' })
+  async changePassword(
+    @User('id') userId: string,
+    @Body() dto: ChangePasswordDto,
+  ) {
+    this.logger.log(`🔐 Change password request for user: ${userId}`);
+
+    const result = await this.authService.changePassword(
+      userId,
+      dto.currentPassword,
+      dto.newPassword,
+    );
+
+    return result;
   }
 
   @Get('stats')

@@ -34,6 +34,7 @@ import { ArchitectureAgent } from '@agents/architecture/architecture.agent';
 import { AnalysisAgent } from '@agents/analysis/analysis.agent';
 import { MetricsAgent } from '@agents/metrics/metrics.agent';
 import { PMAgent } from '@agents/pm/pm.agent';
+import { IssueWorkflowAgent } from '@agents/workflow/issue-workflow.agent';
 
 // Domain
 import { RULE_REPOSITORY } from '@core/domain/ports/rule-repository.token';
@@ -68,7 +69,12 @@ import { IpTrackerMiddleware } from '@shared/middleware/ip-tracker.middleware';
     SessionsModule,
     IssuesModule,
   ],
-  controllers: [HealthController, RulesController, McpController, AuthController],
+  controllers: [
+    HealthController,
+    RulesController,
+    McpController,
+    AuthController,
+  ],
   providers: [
     // Infrastructure
     BM25Engine,
@@ -94,6 +100,7 @@ import { IpTrackerMiddleware } from '@shared/middleware/ip-tracker.middleware';
     AnalysisAgent,
     MetricsAgent,
     PMAgent,
+    IssueWorkflowAgent,
 
     // CQRS Handlers
     SearchRulesHandler,
@@ -116,6 +123,7 @@ export class AppModule implements OnModuleInit {
     private readonly analysisAgent: AnalysisAgent,
     private readonly metricsAgent: MetricsAgent,
     private readonly pmAgent: PMAgent,
+    private readonly issueWorkflowAgent: IssueWorkflowAgent,
     private readonly rulesEngine: RulesEngine,
   ) {}
 
@@ -132,6 +140,7 @@ export class AppModule implements OnModuleInit {
     this.agentRegistry.register(this.analysisAgent);
     this.agentRegistry.register(this.metricsAgent);
     this.agentRegistry.register(this.pmAgent);
+    this.agentRegistry.register(this.issueWorkflowAgent);
 
     // Register agents in the router
     this.routerAgent.registerAllAgents();

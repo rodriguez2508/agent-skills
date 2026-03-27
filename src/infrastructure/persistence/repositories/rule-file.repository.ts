@@ -3,7 +3,10 @@ import { ConfigService } from '@nestjs/config';
 import * as fs from 'fs';
 import * as path from 'path';
 import { Rule, RuleImpact } from '@core/domain/entities/rule.entity';
-import { RULE_REPOSITORY, RuleRepository } from '@core/domain/ports/rule-repository.token';
+import {
+  RULE_REPOSITORY,
+  RuleRepository,
+} from '@core/domain/ports/rule-repository.token';
 
 @Injectable()
 export class RuleFileRepository implements RuleRepository {
@@ -12,7 +15,10 @@ export class RuleFileRepository implements RuleRepository {
   private cache: Map<string, Rule> = new Map();
 
   constructor(private readonly configService: ConfigService) {
-    const rulesPathConfig = this.configService.get<string>('RULES_PATH', './src/rules');
+    const rulesPathConfig = this.configService.get<string>(
+      'RULES_PATH',
+      './src/rules',
+    );
     // Convertir a ruta absoluta si es relativa
     this.rulesPath = rulesPathConfig.startsWith('/')
       ? rulesPathConfig
@@ -36,10 +42,10 @@ export class RuleFileRepository implements RuleRepository {
   async findAll(): Promise<Rule[]> {
     this.invalidateCache();
     const rules: Rule[] = [];
-    
+
     // Check if we have subdirectories (category-based) or flat structure
     const hasSubdirs = await this.hasCategorySubdirectories();
-    
+
     if (hasSubdirs) {
       const categories = await this.getCategories();
       for (const category of categories) {
@@ -48,7 +54,9 @@ export class RuleFileRepository implements RuleRepository {
       }
     } else {
       // Flat structure - read all .md files from rulesPath
-      const files = fs.readdirSync(this.rulesPath).filter((file) => file.endsWith('.md') && !file.startsWith('_'));
+      const files = fs
+        .readdirSync(this.rulesPath)
+        .filter((file) => file.endsWith('.md') && !file.startsWith('_'));
       for (const file of files) {
         const rule = await this.loadRuleFromFlatFile(file);
         if (rule) {
@@ -63,17 +71,19 @@ export class RuleFileRepository implements RuleRepository {
   async findByCategory(category: string): Promise<Rule[]> {
     this.invalidateCache();
     const rules: Rule[] = [];
-    
+
     // Check if we have subdirectories (category-based) or flat structure
     const hasSubdirs = await this.hasCategorySubdirectories();
-    
+
     if (hasSubdirs) {
       const categoryPath = path.join(this.rulesPath, category.toLowerCase());
       if (!fs.existsSync(categoryPath)) {
         return rules;
       }
 
-      const files = fs.readdirSync(categoryPath).filter((file) => file.endsWith('.md'));
+      const files = fs
+        .readdirSync(categoryPath)
+        .filter((file) => file.endsWith('.md'));
       for (const file of files) {
         const rule = await this.loadRuleFromFileFile(category, file);
         if (rule) {
@@ -82,7 +92,9 @@ export class RuleFileRepository implements RuleRepository {
       }
     } else {
       // Flat structure - filter by category extracted from filename or content
-      const files = fs.readdirSync(this.rulesPath).filter((file) => file.endsWith('.md') && !file.startsWith('_'));
+      const files = fs
+        .readdirSync(this.rulesPath)
+        .filter((file) => file.endsWith('.md') && !file.startsWith('_'));
       for (const file of files) {
         const rule = await this.loadRuleFromFlatFile(file);
         if (rule && rule.category.toLowerCase() === category.toLowerCase()) {
@@ -111,11 +123,7 @@ export class RuleFileRepository implements RuleRepository {
     const rule = await this.findById(id);
     if (!rule) return;
 
-    const filePath = path.join(
-      this.rulesPath,
-      rule.category,
-      `${rule.id}.md`,
-    );
+    const filePath = path.join(this.rulesPath, rule.category, `${rule.id}.md`);
     if (fs.existsSync(filePath)) {
       fs.unlinkSync(filePath);
     }
@@ -194,7 +202,9 @@ export class RuleFileRepository implements RuleRepository {
     const frontmatterMatch = content.match(/^---\n([\s\S]*?)\n---/);
     if (frontmatterMatch) {
       const frontmatter = frontmatterMatch[1];
-      const descMatch = frontmatter.match(/impactDescription:\s*["']?(.+?)["']?/i);
+      const descMatch = frontmatter.match(
+        /impactDescription:\s*["']?(.+?)["']?/i,
+      );
       if (descMatch) {
         return descMatch[1].trim();
       }
@@ -203,27 +213,30 @@ export class RuleFileRepository implements RuleRepository {
   }
 
   private extractCategoryFromFilename(filename: string): string {
+    // First try frontmatter: category: value
+    // Note: This needs to be passed from the content, so we'll handle it in the caller
+
     // Extract category from filename prefix (e.g., "api-use-dto" -> "api")
     const prefix = filename.split('-')[0];
-    
+
     const categoryMap: Record<string, string> = {
-      'api': 'api',
-      'arch': 'architecture',
-      'clean': 'clean-architecture',
-      'cqrs': 'cqrs',
-      'db': 'database',
-      'dependency': 'dependency-injection',
-      'dev': 'development',
-      'di': 'dependency-injection',
-      'error': 'error-handling',
-      'git': 'git',
-      'hex': 'hexagonal',
-      'micro': 'microservices',
-      'perf': 'performance',
-      'qwen': 'qwen',
-      'security': 'security',
-      'test': 'testing',
-      'type': 'typescript',
+      api: 'api',
+      arch: 'architecture',
+      clean: 'clean-architecture',
+      cqrs: 'cqrs',
+      db: 'database',
+      dependency: 'dependency-injection',
+      dev: 'development',
+      di: 'dependency-injection',
+      error: 'error-handling',
+      git: 'git',
+      hex: 'hexagonal',
+      micro: 'microservices',
+      perf: 'performance',
+      qwen: 'qwen',
+      security: 'security',
+      test: 'testing',
+      type: 'typescript',
     };
 
     return categoryMap[prefix] || 'general';
@@ -268,6 +281,17 @@ export class RuleFileRepository implements RuleRepository {
   }
 
   private extractTitle(content: string): string {
+    // First try frontmatter: title: value
+    const frontmatterMatch = content.match(/^---\n([\s\S]*?)\n---/);
+    if (frontmatterMatch) {
+      const frontmatter = frontmatterMatch[1];
+      const titleMatch = frontmatter.match(/title:\s*(.+)/i);
+      if (titleMatch) {
+        return titleMatch[1].trim();
+      }
+    }
+
+    // Then try markdown heading: # Title
     const match = content.match(/^# (.+)$/m);
     return match ? match[1].trim() : 'Untitled Rule';
   }
@@ -282,13 +306,13 @@ export class RuleFileRepository implements RuleRepository {
         return tagsMatch[1].split(',').map((t: string) => t.trim());
       }
     }
-    
+
     // Try bracket format: tags: [value1, value2]
     const bracketMatch = content.match(/tags:\s*\[(.+)\]/i);
     if (bracketMatch) {
       return bracketMatch[1].split(',').map((tag) => tag.trim());
     }
-    
+
     return [];
   }
 

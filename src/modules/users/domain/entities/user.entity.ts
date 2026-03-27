@@ -28,11 +28,29 @@ export class User {
   @Column({ nullable: true })
   name?: string;
 
+  @Column({ nullable: true, select: false })
+  password?: string;
+
   @Column({ nullable: true })
   avatar?: string;
 
   @Column({ default: true })
   active: boolean;
+
+  @Column({ default: false })
+  emailVerified: boolean;
+
+  @Column({ nullable: true })
+  emailVerificationToken?: string;
+
+  @Column({ nullable: true })
+  emailVerificationTokenExpires?: Date;
+
+  @Column({ nullable: true })
+  resetPasswordToken?: string;
+
+  @Column({ nullable: true })
+  resetPasswordTokenExpires?: Date;
 
   @Column('jsonb', { nullable: true })
   preferences?: {

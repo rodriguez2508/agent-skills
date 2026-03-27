@@ -7,7 +7,7 @@
 
 import { Injectable, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, In } from 'typeorm';
+import { Repository, In, MoreThanOrEqual } from 'typeorm';
 import { User } from '../../domain/entities/user.entity';
 import {
   IUserRepository,
@@ -42,6 +42,7 @@ export class UserRepository implements IUserRepository {
     email?: string;
     name?: string;
     avatar?: string;
+    password?: string;
   }): Promise<FindUserByIpResult> {
     const maxRetries = 3;
     let lastError: Error | null = null;
@@ -63,9 +64,11 @@ export class UserRepository implements IUserRepository {
           email: data.email || `user_${Date.now()}_${Math.random().toString(36).substring(2, 8)}@anonymous.local`,
           name: data.name,
           avatar: data.avatar,
+          password: data.password,
           lastIpAddress: data.ipAddress,
           ipAddressHistory: [data.ipAddress],
           active: true,
+          emailVerified: !!data.email, // If email is provided, mark as verified
           preferences: {},
           totalSessions: 0,
           totalSearches: 0,
@@ -122,6 +125,114 @@ export class UserRepository implements IUserRepository {
   async findByEmail(email: string): Promise<User | null> {
     return this.repository.findOne({
       where: { email },
+      select: ['id', 'email', 'name', 'avatar', 'active', 'emailVerified', 'password', 'preferences', 'totalSessions', 'totalSearches', 'lastIpAddress', 'ipAddressHistory', 'createdAt', 'updatedAt'],
+    });
+  }
+
+  /**
+   * Find user by email with password (for authentication)
+   */
+  async findByEmailWithPassword(email: string): Promise<User | null> {
+    return this.repository.findOne({
+      where: { email },
+      select: ['id', 'email', 'name', 'avatar', 'active', 'emailVerified', 'password', 'preferences', 'totalSessions', 'totalSearches', 'lastIpAddress', 'ipAddressHistory', 'createdAt', 'updatedAt', 'emailVerificationToken', 'emailVerificationTokenExpires', 'resetPasswordToken', 'resetPasswordTokenExpires'],
+    });
+  }
+
+  /**
+   * Find user by email verification token
+   */
+  async findByEmailVerificationToken(token: string): Promise<User | null> {
+    return this.repository.findOne({
+      where: {
+        emailVerificationToken: token,
+        emailVerificationTokenExpires: MoreThanOrEqual(new Date()),
+      },
+    });
+  }
+
+  /**
+   * Find user by password reset token
+   */
+  async findByResetPasswordToken(token: string): Promise<User | null> {
+    return this.repository.findOne({
+      where: {
+        resetPasswordToken: token,
+        resetPasswordTokenExpires: MoreThanOrEqual(new Date()),
+      },
+    });
+  }
+
+  /**
+   * Update user password
+   */
+  async updatePassword(userId: string, hashedPassword: string): Promise<User> {
+    await this.repository.update(userId, {
+      password: hashedPassword,
+    });
+    const user = await this.findById(userId);
+    if (!user) {
+      throw new Error(`User not found: ${userId}`);
+    }
+    return user;
+  }
+
+  /**
+   * Set email verification token
+   */
+  async setEmailVerificationToken(
+    userId: string,
+    token: string,
+    expires: Date,
+  ): Promise<void> {
+    await this.repository.update(userId, {
+      emailVerificationToken: token,
+      emailVerificationTokenExpires: expires,
+    });
+  }
+
+  /**
+   * Clear email verification token (after verification)
+   */
+  async clearEmailVerificationToken(userId: string): Promise<void> {
+    await this.repository.update(userId, {
+      emailVerificationToken: undefined,
+      emailVerificationTokenExpires: undefined,
+    });
+  }
+
+  /**
+   * Mark email as verified
+   */
+  async markEmailAsVerified(userId: string): Promise<void> {
+    await this.repository.update(userId, {
+      emailVerified: true,
+      emailVerificationToken: undefined,
+      emailVerificationTokenExpires: undefined,
+    });
+  }
+
+  /**
+   * Set password reset token
+   */
+  async setPasswordResetToken(
+    userId: string,
+    token: string,
+    expires: Date,
+  ): Promise<void> {
+    await this.repository.update(userId, {
+      resetPasswordToken: token,
+      resetPasswordTokenExpires: expires,
+    });
+  }
+
+  /**
+   * Clear password reset token
+   */
+  async clearPasswordResetToken(userId: string): Promise<void> {
+    await this.repository.update(userId, {
+      resetPasswordToken: undefined,
+      resetPasswordTokenExpires: undefined,
     });
   }
 

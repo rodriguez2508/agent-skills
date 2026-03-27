@@ -5,11 +5,21 @@
  * Users are grouped by IP address.
  */
 
-import { Injectable, Logger, BadRequestException } from '@nestjs/common';
+import {
+  Injectable,
+  Logger,
+  BadRequestException,
+  UnauthorizedException,
+  NotFoundException,
+} from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { UserRepository } from '@modules/users/infrastructure/persistence/user.repository';
 import { SessionRepository } from '@modules/sessions/infrastructure/persistence/session.repository';
 import { SessionCleanupService } from '@modules/sessions/infrastructure/services/session-cleanup.service';
 import { SessionStatus } from '@modules/sessions/domain/entities/session.entity';
+import { PasswordHashService } from '../../infrastructure/services/password-hash.service';
+import { TokenService } from '../../infrastructure/services/token.service';
+import { EmailService } from '../../infrastructure/services/email.service';
 
 export interface AuthResult {
   user: UserDto;
@@ -23,6 +33,7 @@ export interface UserDto {
   name?: string;
   avatar?: string;
   active: boolean;
+  emailVerified: boolean;
   preferences?: any;
   totalSessions: number;
   totalSearches: number;
@@ -39,15 +50,50 @@ export interface SessionDto {
   createdAt: Date;
 }
 
+export interface RegisterWithPasswordDto {
+  email: string;
+  password: string;
+  name?: string;
+  avatar?: string;
+  ipAddress: string;
+  sessionId: string;
+}
+
+export interface LoginWithPasswordDto {
+  email: string;
+  password: string;
+  ipAddress: string;
+  sessionId: string;
+}
+
+export interface RequestPasswordResetDto {
+  email: string;
+  frontendUrl: string;
+}
+
+export interface ResetPasswordDto {
+  token: string;
+  newPassword: string;
+}
+
 @Injectable()
 export class AuthService {
   private readonly logger = new Logger(AuthService.name);
+  private readonly frontendBaseUrl: string;
 
   constructor(
     private readonly userRepository: UserRepository,
     private readonly sessionRepository: SessionRepository,
     private readonly sessionCleanupService: SessionCleanupService,
-  ) {}
+    private readonly passwordHashService: PasswordHashService,
+    private readonly tokenService: TokenService,
+    private readonly emailService: EmailService,
+    private readonly configService: ConfigService,
+  ) {
+    this.frontendBaseUrl =
+      this.configService.get<string>('FRONTEND_BASE_URL') ||
+      'http://localhost:3000';
+  }
 
   /**
    * Register or login user by IP address
@@ -183,14 +229,237 @@ export class AuthService {
   }
 
   /**
-   * Get user statistics
+   * Register user with email and password
    */
-  async getStats(): Promise<{
-    totalUsers: number;
-    activeUsers: number;
-    usersByIp: number;
+  async registerWithPassword(data: RegisterWithPasswordDto): Promise<AuthResult> {
+    // Check if user already exists
+    const existingUser = await this.userRepository.findByEmail(data.email);
+
+    if (existingUser) {
+      throw new BadRequestException('User with this email already exists');
+    }
+
+    // Hash password
+    const hashedPassword = await this.passwordHashService.hashPassword(data.password);
+
+    // Generate email verification token
+    const { token: verificationToken, hashedToken, expires } =
+      this.tokenService.generateEmailVerificationToken();
+
+    // Create user
+    const { user } = await this.userRepository.findByIpOrCreate({
+      ipAddress: data.ipAddress,
+      email: data.email,
+      name: data.name,
+      avatar: data.avatar,
+      password: hashedPassword,
+    });
+
+    // Save verification token
+    await this.userRepository.setEmailVerificationToken(user.id, hashedToken, expires);
+
+    // Send verification email
+    const verificationUrl = `${this.frontendBaseUrl}/auth/verify-email?token=${verificationToken}`;
+    await this.emailService.sendVerificationEmail(
+      data.email,
+      verificationUrl,
+      data.name,
+    );
+
+    // Create session
+    const session = await this.sessionRepository.create({
+      sessionId: data.sessionId,
+      userId: user.id,
+      title: data.name ? `Session with ${data.name}` : undefined,
+      metadata: {
+        ipAddress: data.ipAddress,
+      },
+    });
+
+    this.logger.log(`🔐 User registered with email: ${user.id} (${data.email})`);
+
+    return {
+      user: this.mapUserToDto(user),
+      session: this.mapSessionToDto(session),
+      isNewUser: true,
+    };
+  }
+
+  /**
+   * Login with email and password
+   */
+  async loginWithPassword(data: LoginWithPasswordDto): Promise<AuthResult> {
+    const user = await this.userRepository.findByEmailWithPassword(data.email);
+
+    if (!user || !user.password) {
+      throw new UnauthorizedException('Invalid email or password');
+    }
+
+    if (!user.active) {
+      throw new BadRequestException('User account is not active');
+    }
+
+    // Verify password
+    const isPasswordValid = await this.passwordHashService.comparePassword(
+      data.password,
+      user.password,
+    );
+
+    if (!isPasswordValid) {
+      throw new UnauthorizedException('Invalid email or password');
+    }
+
+    // Update user's IP address
+    await this.userRepository.updateIpAddress(user.id, data.ipAddress);
+
+    // Create session
+    const session = await this.sessionRepository.create({
+      sessionId: data.sessionId,
+      userId: user.id,
+      metadata: {
+        ipAddress: data.ipAddress,
+      },
+    });
+
+    this.logger.log(`🔐 User logged in with password: ${user.id} (${data.email})`);
+
+    return {
+      user: this.mapUserToDto(user),
+      session: this.mapSessionToDto(session),
+      isNewUser: false,
+    };
+  }
+
+  /**
+   * Verify email with token
+   */
+  async verifyEmail(token: string): Promise<{ success: boolean; message: string }> {
+    const hashedToken = this.tokenService.hashToken(token);
+    const user = await this.userRepository.findByEmailVerificationToken(hashedToken);
+
+    if (!user) {
+      throw new BadRequestException('Invalid or expired verification token');
+    }
+
+    // Mark email as verified
+    await this.userRepository.markEmailAsVerified(user.id);
+
+    // Send welcome email
+    await this.emailService.sendWelcomeEmail(user.email, user.name);
+
+    this.logger.log(`✅ Email verified for user: ${user.id} (${user.email})`);
+
+    return {
+      success: true,
+      message: 'Email verified successfully',
+    };
+  }
+
+  /**
+   * Request password reset
+   */
+  async requestPasswordReset(data: RequestPasswordResetDto): Promise<{
+    success: boolean;
+    message: string;
   }> {
-    return this.userRepository.getStats();
+    const user = await this.userRepository.findByEmail(data.email);
+
+    // Always return success to prevent email enumeration
+    if (!user) {
+      return {
+        success: true,
+        message: 'If the email exists, a password reset link has been sent',
+      };
+    }
+
+    // Generate reset token
+    const { token: resetToken, hashedToken, expires } =
+      this.tokenService.generatePasswordResetToken();
+
+    // Save reset token
+    await this.userRepository.setPasswordResetToken(user.id, hashedToken, expires);
+
+    // Send reset email
+    const resetUrl = `${data.frontendUrl}/auth/reset-password?token=${resetToken}`;
+    await this.emailService.sendPasswordResetEmail(
+      data.email,
+      resetUrl,
+      user.name,
+    );
+
+    this.logger.log(`🔑 Password reset requested for user: ${user.id} (${data.email})`);
+
+    return {
+      success: true,
+      message: 'If the email exists, a password reset link has been sent',
+    };
+  }
+
+  /**
+   * Reset password with token
+   */
+  async resetPassword(data: ResetPasswordDto): Promise<{
+    success: boolean;
+    message: string;
+  }> {
+    const hashedToken = this.tokenService.hashToken(data.token);
+    const user = await this.userRepository.findByResetPasswordToken(hashedToken);
+
+    if (!user) {
+      throw new BadRequestException('Invalid or expired reset token');
+    }
+
+    // Hash new password
+    const hashedPassword = await this.passwordHashService.hashPassword(data.newPassword);
+
+    // Update password and clear reset token
+    await this.userRepository.updatePassword(user.id, hashedPassword);
+    await this.userRepository.clearPasswordResetToken(user.id);
+
+    this.logger.log(`🔐 Password reset for user: ${user.id} (${user.email})`);
+
+    return {
+      success: true,
+      message: 'Password reset successfully',
+    };
+  }
+
+  /**
+   * Change password (for authenticated users)
+   */
+  async changePassword(
+    userId: string,
+    currentPassword: string,
+    newPassword: string,
+  ): Promise<{ success: boolean; message: string }> {
+    const user = await this.userRepository.findByEmailWithPassword(
+      await this.userRepository.findById(userId).then((u) => u?.email) || '',
+    );
+
+    if (!user || !user.password) {
+      throw new NotFoundException('User not found');
+    }
+
+    // Verify current password
+    const isPasswordValid = await this.passwordHashService.comparePassword(
+      currentPassword,
+      user.password,
+    );
+
+    if (!isPasswordValid) {
+      throw new UnauthorizedException('Current password is incorrect');
+    }
+
+    // Hash and update new password
+    const hashedPassword = await this.passwordHashService.hashPassword(newPassword);
+    await this.userRepository.updatePassword(userId, hashedPassword);
+
+    this.logger.log(`🔐 Password changed for user: ${userId}`);
+
+    return {
+      success: true,
+      message: 'Password changed successfully',
+    };
   }
 
   /**
@@ -202,6 +471,17 @@ export class AuthService {
     totalMessages: number;
   }> {
     return this.sessionRepository.getStats();
+  }
+
+  /**
+   * Get user statistics
+   */
+  async getStats(): Promise<{
+    totalUsers: number;
+    activeUsers: number;
+    usersByIp: number;
+  }> {
+    return this.userRepository.getStats();
   }
 
   /**
@@ -231,6 +511,7 @@ export class AuthService {
       name: user.name,
       avatar: user.avatar,
       active: user.active,
+      emailVerified: user.emailVerified,
       preferences: user.preferences,
       totalSessions: user.totalSessions,
       totalSearches: user.totalSearches,

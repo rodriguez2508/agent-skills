@@ -43,25 +43,31 @@ export class McpService {
   async findActiveSessionId(clientId: string): Promise<string | null> {
     try {
       // Try Redis first (faster)
-      const cachedSessionId = await this.redisService.get<string>(`client:${clientId}:sessionId`);
+      const cachedSessionId = await this.redisService.get<string>(
+        `client:${clientId}:sessionId`,
+      );
       if (cachedSessionId) {
         // Check if session exists in PostgreSQL
-        const session = await this.sessionRepository.findBySessionId(cachedSessionId);
+        const session =
+          await this.sessionRepository.findBySessionId(cachedSessionId);
         if (session && session.status === 'active') {
           this.logger.debug(`♻️ Session found in cache: ${cachedSessionId}`);
 
           // FIX: If session has no user_id, update it
           if (!session.userId) {
             const ipAddress = clientId.replace('ip-', '');
-            const { user } = await this.userRepository.findByIpOrCreate({ ipAddress });
+            const { user } = await this.userRepository.findByIpOrCreate({
+              ipAddress,
+            });
 
             // Update session with user_id
-            await this.sessionRepository.getRepository().update(
-              { id: session.id },
-              { userId: user.id },
-            );
+            await this.sessionRepository
+              .getRepository()
+              .update({ id: session.id }, { userId: user.id });
 
-            this.logger.log(`🔧 Fixed session ${cachedSessionId}: Added userId ${user.id}`);
+            this.logger.log(
+              `🔧 Fixed session ${cachedSessionId}: Added userId ${user.id}`,
+            );
           }
 
           return cachedSessionId;
@@ -70,28 +76,38 @@ export class McpService {
 
       // Search in PostgreSQL
       const sessions = await this.sessionRepository.getActiveSessions();
-      const matchingSession = sessions.find(s =>
-        s.metadata?.clientId === clientId ||
-        s.metadata?.clientIp === clientId.replace('ip-', '')
+      const matchingSession = sessions.find(
+        (s) =>
+          s.metadata?.clientId === clientId ||
+          s.metadata?.clientIp === clientId.replace('ip-', ''),
       );
 
       if (matchingSession) {
         // FIX: If session has no user_id, update it
         if (!matchingSession.userId) {
           const ipAddress = clientId.replace('ip-', '');
-          const { user } = await this.userRepository.findByIpOrCreate({ ipAddress });
+          const { user } = await this.userRepository.findByIpOrCreate({
+            ipAddress,
+          });
 
-          await this.sessionRepository.getRepository().update(
-            { id: matchingSession.id },
-            { userId: user.id },
+          await this.sessionRepository
+            .getRepository()
+            .update({ id: matchingSession.id }, { userId: user.id });
+
+          this.logger.log(
+            `🔧 Fixed session ${matchingSession.sessionId}: Added userId ${user.id}`,
           );
-
-          this.logger.log(`🔧 Fixed session ${matchingSession.sessionId}: Added userId ${user.id}`);
         }
 
         // Cache for next time
-        await this.redisService.set(`client:${clientId}:sessionId`, matchingSession.sessionId, 3600);
-        this.logger.debug(`♻️ Session found in DB: ${matchingSession.sessionId}`);
+        await this.redisService.set(
+          `client:${clientId}:sessionId`,
+          matchingSession.sessionId,
+          3600,
+        );
+        this.logger.debug(
+          `♻️ Session found in DB: ${matchingSession.sessionId}`,
+        );
         return matchingSession.sessionId;
       }
     } catch (error) {
@@ -108,10 +124,9 @@ export class McpService {
     try {
       const session = await this.sessionRepository.findBySessionId(sessionId);
       if (session) {
-        await this.sessionRepository.getRepository().update(
-          { id: session.id },
-          { lastActivityAt: new Date() },
-        );
+        await this.sessionRepository
+          .getRepository()
+          .update({ id: session.id }, { lastActivityAt: new Date() });
         this.logger.debug(`🕒 Session activity updated: ${sessionId}`);
       }
     } catch (error) {
@@ -124,7 +139,10 @@ export class McpService {
    * Creates session in DB immediately
    * REUSES existing session for same IP if available
    */
-  async createSession(res: Response, clientId?: string): Promise<{ sessionId: string; session: McpSession }> {
+  async createSession(
+    res: Response,
+    clientId?: string,
+  ): Promise<{ sessionId: string; session: McpSession }> {
     const transport = new SSEServerTransport('/mcp/message', res);
 
     const server = new McpServer(
@@ -151,7 +169,7 @@ export class McpService {
 
     // Extract IP from clientId (format: "ip-::ffff:127.0.0.1-timestamp")
     const ipMatch = clientId?.match(/^ip-(.+?)(-\d+)?$/);
-    const ipAddress = ipMatch ? ipMatch[1] : (res.req?.ip || 'unknown');
+    const ipAddress = ipMatch ? ipMatch[1] : res.req?.ip || 'unknown';
 
     // STEP 1: Create or get user by IP
     const { user, isNew } = await this.userRepository.findByIpOrCreate({
@@ -161,36 +179,51 @@ export class McpService {
     });
 
     const userId = user.id;
-    this.logger.debug(`👤 User ${isNew ? 'created' : 'found'} for IP ${ipAddress}: ${userId}`);
+    this.logger.debug(
+      `👤 User ${isNew ? 'created' : 'found'} for IP ${ipAddress}: ${userId}`,
+    );
 
     // STEP 2: TRY TO REUSE EXISTING ACTIVE SESSION FOR THIS IP
     let existingSessionId: string | null = null;
     try {
       // Check Redis first (faster)
-      const cachedSessionId = await this.redisService.get<string>(`client:ip-${ipAddress}:sessionId`);
+      const cachedSessionId = await this.redisService.get<string>(
+        `client:ip-${ipAddress}:sessionId`,
+      );
       if (cachedSessionId) {
         // Verify session exists in DB and is active
-        const dbSession = await this.sessionRepository.findBySessionId(cachedSessionId);
+        const dbSession =
+          await this.sessionRepository.findBySessionId(cachedSessionId);
         if (dbSession && dbSession.status === 'active') {
           existingSessionId = cachedSessionId;
-          this.logger.log(`♻️ REUSING existing session for IP ${ipAddress}: ${existingSessionId}`);
+          this.logger.log(
+            `♻️ REUSING existing session for IP ${ipAddress}: ${existingSessionId}`,
+          );
         }
       }
 
       // If not in Redis, search DB for active session by IP
       if (!existingSessionId) {
-        const activeSessions = await this.sessionRepository.getActiveSessions(userId);
-        const matchingSession = activeSessions.find(s => 
-          s.metadata?.clientIp === ipAddress || 
-          s.metadata?.ipAddress === ipAddress
+        const activeSessions =
+          await this.sessionRepository.getActiveSessions(userId);
+        const matchingSession = activeSessions.find(
+          (s) =>
+            s.metadata?.clientIp === ipAddress ||
+            s.metadata?.ipAddress === ipAddress,
         );
 
         if (matchingSession) {
           existingSessionId = matchingSession.sessionId;
-          this.logger.log(`♻️ REUSING existing DB session for IP ${ipAddress}: ${existingSessionId}`);
-          
+          this.logger.log(
+            `♻️ REUSING existing DB session for IP ${ipAddress}: ${existingSessionId}`,
+          );
+
           // Cache for next time
-          await this.redisService.set(`client:ip-${ipAddress}:sessionId`, existingSessionId, 3600);
+          await this.redisService.set(
+            `client:ip-${ipAddress}:sessionId`,
+            existingSessionId,
+            3600,
+          );
         }
       }
     } catch (error) {
@@ -201,7 +234,8 @@ export class McpService {
     try {
       if (existingSessionId) {
         // Update existing session with new transport info
-        const existingSession = await this.sessionRepository.findBySessionId(existingSessionId);
+        const existingSession =
+          await this.sessionRepository.findBySessionId(existingSessionId);
         await this.sessionRepository.getRepository().update(
           { sessionId: existingSessionId },
           {
@@ -229,35 +263,65 @@ export class McpService {
             createdAt: new Date().toISOString(),
           },
         });
-        this.logger.log(`💾 NEW session created in PostgreSQL: ${transportSessionId}`);
+        this.logger.log(
+          `💾 NEW session created in PostgreSQL: ${transportSessionId}`,
+        );
       }
     } catch (error) {
-      this.logger.error(`Error creating/updating session in DB: ${error.message}`);
+      this.logger.error(
+        `Error creating/updating session in DB: ${error.message}`,
+      );
     }
 
     // STEP 4: Store user info in Redis for fast lookups
     try {
       const finalSessionId = existingSessionId || transportSessionId;
-      await this.redisService.set(`session:${finalSessionId}:userId`, userId, 3600);
-      await this.redisService.set(`session:${finalSessionId}:clientId`, clientId || '', 3600);
-      await this.redisService.set(`session:${finalSessionId}:ip`, ipAddress, 3600);
-      
+      await this.redisService.set(
+        `session:${finalSessionId}:userId`,
+        userId,
+        3600,
+      );
+      await this.redisService.set(
+        `session:${finalSessionId}:clientId`,
+        clientId || '',
+        3600,
+      );
+      await this.redisService.set(
+        `session:${finalSessionId}:ip`,
+        ipAddress,
+        3600,
+      );
+
       // Cache IP -> sessionId mapping
-      await this.redisService.set(`client:ip-${ipAddress}:sessionId`, finalSessionId, 3600);
-      
-      this.logger.debug(`💾 Session metadata stored in Redis: ${finalSessionId}`);
+      await this.redisService.set(
+        `client:ip-${ipAddress}:sessionId`,
+        finalSessionId,
+        3600,
+      );
+
+      this.logger.debug(
+        `💾 Session metadata stored in Redis: ${finalSessionId}`,
+      );
     } catch (error) {
-      this.logger.error(`Error storing session metadata in Redis: ${error.message}`);
+      this.logger.error(
+        `Error storing session metadata in Redis: ${error.message}`,
+      );
     }
 
     // Store clientId -> sessionId in Redis for fast lookups (short TTL, 1 hour)
     if (clientId) {
       const finalSessionId = existingSessionId || transportSessionId;
-      await this.redisService.set(`client:${clientId}:sessionId`, finalSessionId, 3600);
+      await this.redisService.set(
+        `client:${clientId}:sessionId`,
+        finalSessionId,
+        3600,
+      );
     }
 
     const finalSessionId = existingSessionId || transportSessionId;
-    this.logger.log(`✅ MCP: Session ${existingSessionId ? 'REUSED' : 'CREATED'}: ${finalSessionId}`);
+    this.logger.log(
+      `✅ MCP: Session ${existingSessionId ? 'REUSED' : 'CREATED'}: ${finalSessionId}`,
+    );
 
     // Cleanup when connection closes
     res.on('close', () => {
@@ -279,7 +343,8 @@ export class McpService {
     ipAddress?: string,
   ): Promise<string> {
     // Check if session already exists in DB
-    const existingDbSession = await this.sessionRepository.findBySessionId(sessionId);
+    const existingDbSession =
+      await this.sessionRepository.findBySessionId(sessionId);
 
     if (existingDbSession) {
       this.logger.debug(`♻️ Session already exists in DB: ${sessionId}`);
@@ -321,12 +386,23 @@ export class McpService {
    * Creates session if it doesn't exist
    * Automatically creates/links an issue on first message
    */
-  async saveChatMessage(sessionId: string, role: MessageRole, content: string, metadata?: any): Promise<void> {
+  async saveChatMessage(
+    sessionId: string,
+    role: MessageRole,
+    content: string,
+    metadata?: any,
+  ): Promise<void> {
     try {
       // Get user info from Redis
-      const userId = await this.redisService.get<string>(`session:${sessionId}:userId`);
-      const clientId = await this.redisService.get<string>(`session:${sessionId}:clientId`);
-      const ipAddress = await this.redisService.get<string>(`session:${sessionId}:ip`);
+      const userId = await this.redisService.get<string>(
+        `session:${sessionId}:userId`,
+      );
+      const clientId = await this.redisService.get<string>(
+        `session:${sessionId}:clientId`,
+      );
+      const ipAddress = await this.redisService.get<string>(
+        `session:${sessionId}:ip`,
+      );
 
       // Create session if it doesn't exist (first message)
       if (userId) {
@@ -342,7 +418,11 @@ export class McpService {
       // AUTO-CREATE ISSUE on first user message
       let issueId: string | null = null;
       if (role === MessageRole.USER && userId) {
-        issueId = await this.getOrCreateIssueForSession(sessionId, userId, content);
+        issueId = await this.getOrCreateIssueForSession(
+          sessionId,
+          userId,
+          content,
+        );
       }
 
       await this.sessionRepository.addMessage({
@@ -353,7 +433,9 @@ export class McpService {
         metadata,
         tokenCount: content.length,
       });
-      this.logger.debug(`💬 Message saved to PostgreSQL: ${sessionId} - ${role}`);
+      this.logger.debug(
+        `💬 Message saved to PostgreSQL: ${sessionId} - ${role}`,
+      );
     } catch (error) {
       this.logger.error(`Error saving message to DB: ${error.message}`);
     }
@@ -371,21 +453,24 @@ export class McpService {
     try {
       // Check if session already has an issue linked
       const session = await this.sessionRepository.findBySessionId(sessionId);
-      
+
       if (session?.issueId) {
         this.logger.debug(`♻️ Session already has issue: ${session.issueId}`);
         return session.issueId;
       }
 
       // Check Redis for cached issueId
-      const cachedIssueId = await this.redisService.get<string>(`session:${sessionId}:issueId`);
+      const cachedIssueId = await this.redisService.get<string>(
+        `session:${sessionId}:issueId`,
+      );
       if (cachedIssueId) {
         this.logger.debug(`♻️ Issue found in Redis: ${cachedIssueId}`);
         return cachedIssueId;
       }
 
       // Generate issue title from user message (first 100 chars)
-      const title = userMessage.substring(0, 100) + (userMessage.length > 100 ? '...' : '');
+      const title =
+        userMessage.substring(0, 100) + (userMessage.length > 100 ? '...' : '');
 
       // Create new issue automatically
       const issue = await this.issueService.createIssue({
@@ -403,18 +488,29 @@ export class McpService {
 
       // Link issue to session
       if (session) {
-        await this.sessionRepository.getRepository().update(
-          { sessionId },
-          { issueId: issue.id },
+        await this.sessionRepository
+          .getRepository()
+          .update({ sessionId }, { issueId: issue.id });
+        this.logger.log(
+          `🔗 Issue linked to session: ${issue.issueId} -> ${sessionId}`,
         );
-        this.logger.log(`🔗 Issue linked to session: ${issue.issueId} -> ${sessionId}`);
       }
 
       // Cache in Redis
-      await this.redisService.set(`session:${sessionId}:issueId`, issue.id, 3600);
-      await this.redisService.set(`issue:${issue.id}:sessionId`, sessionId, 3600);
+      await this.redisService.set(
+        `session:${sessionId}:issueId`,
+        issue.id,
+        3600,
+      );
+      await this.redisService.set(
+        `issue:${issue.id}:sessionId`,
+        sessionId,
+        3600,
+      );
 
-      this.logger.log(`✅ Issue auto-created for conversation: ${issue.issueId} (${title})`);
+      this.logger.log(
+        `✅ Issue auto-created for conversation: ${issue.issueId} (${title})`,
+      );
 
       return issue.id;
     } catch (error) {
@@ -426,75 +522,102 @@ export class McpService {
   private registerTools(server: McpServer) {
     this.logger.log('🔧 MCP: Registering tools...');
 
-    // chat_with_agents - MAIN TOOL! Routes to specialized agents (PM, Code, Architecture, etc.)
+    // agent_query - MAIN TOOL! Routes to specialized agents (PM, Code, Architecture, etc.)
     server.tool(
-      'chat_with_agents',
-      'Main chat tool - Routes your message to a specialized agent (PM, Code, Architecture, Analysis, etc.). Use this for ALL questions and requests.',
+      'agent_query',
+      'Main chat tool - Routes your message to a specialized agent (PM, Code, Architecture, Analysis, etc.). Use this for ALL questions and requests. Automatically creates issues when working on tasks.',
       {
         message: z.string().describe('Your question or request'),
-        context: z.any().optional().describe('Additional context (web info, project code, etc.)'),
+        context: z
+          .any()
+          .optional()
+          .describe('Additional context (web info, project code, etc.)'),
+        sessionId: z
+          .string()
+          .optional()
+          .describe('Session ID for conversation continuity'),
       },
-      async ({ message, context }, extra) => {
-        const sessionId = extra?.sessionId || 'unknown';
-        
-        this.logger.log(`💬 MCP: chat_with_agents called - message="${message.substring(0, 100)}..."`);
-        
+      async ({ message, context, sessionId }, extra) => {
+        const sid = sessionId || extra?.sessionId || 'unknown';
+
+        this.logger.log(
+          `💬 MCP: agent_query called - message="${message.substring(0, 100)}..."`,
+        );
+
         try {
           // Call the chat endpoint which auto-routes to specialized agents
           const port = this.apiPort;
           const url = `http://localhost:${port}/mcp/chat`;
-          
+
           const response = await fetch(url, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
               input: message,
-              options: { context, sessionId },
-              sessionId,
+              options: { context, sessionId: sid },
+              sessionId: sid,
             }),
           });
-          
+
           const result = await response.json();
-          
+
           if (result.success) {
-            this.logger.log(`✅ MCP: Agent responded - ${result.data?.targetAgent || 'unknown'}`);
-            
+            this.logger.log(
+              `✅ MCP: Agent responded - ${result.data?.targetAgent || 'unknown'}`,
+            );
+
             // Format response with agent info
             let text = '';
-            
+
             if (result.data?.targetAgent) {
               text += `🤖 **${result.data.targetAgent}** te ayuda:\n\n`;
             }
-            
+
             if (result.data?.message) {
               text += result.data.message;
             }
-            
+
             // Add routed agent info
             if (result.data?.routedBy && result.data?.targetAgent) {
               text += `\n\n---\n*Enrutado por: ${result.data.routedBy} → ${result.data.targetAgent}*`;
             }
-            
+
+            // Add issue info if created
+            if (result.data?.issue) {
+              const issue = result.data.issue;
+              text += `\n\n📋 **Issue creado:** ${issue.title || issue.id || 'N/A'}\n`;
+              if (issue.id) text += `ID: ${issue.id}\n`;
+            }
+
             // Add relevant rules if any
-            if (result.data?.relevantRules && result.data.relevantRules.length > 0) {
-              text += `\n\n📋 **Reglas aplicadas:** ${result.data.relevantRules.length}\n`;
+            if (
+              result.data?.relevantRules &&
+              result.data.relevantRules.length > 0
+            ) {
+              text += `\n\n📚 **Reglas aplicadas:** ${result.data.relevantRules.length}\n`;
               result.data.relevantRules.forEach((r: any, i: number) => {
                 text += `\n${i + 1}. ${r.name} (${r.category})`;
               });
             }
-            
+
+            // Add metadata
+            if (result.metadata?.executionTime) {
+              text += `\n\n⏱️ Tiempo: ${result.metadata.executionTime}ms`;
+            }
+
             return { content: [{ type: 'text' as const, text }] };
           } else {
-            this.logger.error(`❌ MCP: Agent error - ${result.error}`);
-            return { 
-              content: [{ type: 'text' as const, text: `⚠️ Error: ${result.error}` }],
+            return {
+              content: [
+                { type: 'text' as const, text: `⚠️ Error: ${result.error}` },
+              ],
               isError: true,
             };
           }
         } catch (error) {
           const msg = error instanceof Error ? error.message : 'Error';
-          this.logger.error(`❌ MCP: chat_with_agents failed - ${msg}`);
-          return { 
+          this.logger.error(`❌ MCP: agent_query failed - ${msg}`);
+          return {
             content: [{ type: 'text' as const, text: `⚠️ Error: ${msg}` }],
             isError: true,
           };
@@ -502,36 +625,45 @@ export class McpService {
       },
     );
 
-    // ask_agent - Alias for chat_with_agents (for backward compatibility)
+    // chat_with_agents - Alias for agent_query (for backward compatibility)
     server.tool(
-      'ask_agent',
-      'Ask a question and get help from a specialized agent (PM, Code, Architecture, etc.). This is the MAIN tool for getting help.',
+      'chat_with_agents',
+      'Ask a question and get help from a specialized agent (PM, Code, Architecture, etc.). This is an alias for agent_query.',
       {
-        question: z.string().describe('Your question or request'),
-        context: z.any().optional().describe('Additional context (web info, project code, etc.)'),
+        message: z.string().describe('Your question or request'),
+        context: z
+          .any()
+          .optional()
+          .describe('Additional context (web info, project code, etc.)'),
+        sessionId: z
+          .string()
+          .optional()
+          .describe('Session ID for conversation continuity'),
       },
-      async ({ question, context }, extra) => {
-        // Same implementation as chat_with_agents
-        const sessionId = extra?.sessionId || 'unknown';
-        
-        this.logger.log(`🤖 MCP: ask_agent called - question="${question.substring(0, 100)}..."`);
-        
+      async ({ message, context, sessionId }, extra) => {
+        // Same implementation as agent_query
+        const sid = sessionId || extra?.sessionId || 'unknown';
+
+        this.logger.log(
+          `🤖 MCP: chat_with_agents called - message="${message.substring(0, 100)}..."`,
+        );
+
         try {
           const port = this.apiPort;
           const url = `http://localhost:${port}/mcp/chat`;
-          
+
           const response = await fetch(url, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
-              input: question,
-              options: { context, sessionId },
-              sessionId,
+              input: message,
+              options: { context, sessionId: sid },
+              sessionId: sid,
             }),
           });
-          
+
           const result = await response.json();
-          
+
           if (result.success) {
             let text = '';
             if (result.data?.targetAgent) {
@@ -543,7 +675,10 @@ export class McpService {
             if (result.data?.routedBy && result.data?.targetAgent) {
               text += `\n\n---\n*Enrutado por: ${result.data.routedBy} → ${result.data.targetAgent}*`;
             }
-            if (result.data?.relevantRules && result.data.relevantRules.length > 0) {
+            if (
+              result.data?.relevantRules &&
+              result.data.relevantRules.length > 0
+            ) {
               text += `\n\n📋 **Reglas aplicadas:** ${result.data.relevantRules.length}\n`;
               result.data.relevantRules.forEach((r: any, i: number) => {
                 text += `\n${i + 1}. ${r.name} (${r.category})`;
@@ -551,14 +686,16 @@ export class McpService {
             }
             return { content: [{ type: 'text' as const, text }] };
           } else {
-            return { 
-              content: [{ type: 'text' as const, text: `⚠️ Error: ${result.error}` }],
+            return {
+              content: [
+                { type: 'text' as const, text: `⚠️ Error: ${result.error}` },
+              ],
               isError: true,
             };
           }
         } catch (error) {
           const msg = error instanceof Error ? error.message : 'Error';
-          return { 
+          return {
             content: [{ type: 'text' as const, text: `⚠️ Error: ${msg}` }],
             isError: true,
           };
@@ -571,32 +708,51 @@ export class McpService {
       'auto_apply_rules',
       'Automatically searches and applies relevant code rules to the user query. This tool should be called on every user message to provide context-aware responses.',
       {
-        userQuery: z.string().describe('The user\'s question or request'),
+        userQuery: z.string().describe("The user's question or request"),
         sessionId: z.string().optional().describe('Session ID for tracking'),
       },
       async ({ userQuery, sessionId }, extra) => {
         const currentSessionId = sessionId || extra?.sessionId || 'unknown';
-        
-        this.logger.log(`🤖 MCP: auto_apply_rules triggered - query="${userQuery.substring(0, 100)}..."`);
-        
+
+        this.logger.log(
+          `🤖 MCP: auto_apply_rules triggered - query="${userQuery.substring(0, 100)}..."`,
+        );
+
         try {
           // Search for relevant rules
           const url = `http://localhost:${this.apiPort}/rules/search?q=${encodeURIComponent(userQuery)}&limit=5`;
           const response = await fetch(url);
           const data = await response.json();
-          
+
           if (data.results && data.results.length > 0) {
-            this.logger.log(`✅ MCP: Found ${data.results.length} relevant rules`);
+            this.logger.log(
+              `✅ MCP: Found ${data.results.length} relevant rules`,
+            );
             const text = this.formatResponse('search', data);
             return { content: [{ type: 'text' as const, text }] };
           } else {
             this.logger.debug('ℹ️ MCP: No relevant rules found');
-            return { content: [{ type: 'text' as const, text: '🎓 **Según CodeMentor MCP**: No se encontraron reglas relevantes para esta consulta.' }] };
+            return {
+              content: [
+                {
+                  type: 'text' as const,
+                  text: '🎓 **Según CodeMentor MCP**: No se encontraron reglas relevantes para esta consulta.',
+                },
+              ],
+            };
           }
         } catch (error) {
           const msg = error instanceof Error ? error.message : 'Error';
           this.logger.error(`❌ MCP: auto_apply_rules failed - ${msg}`);
-          return { content: [{ type: 'text' as const, text: `⚠️ 🎓 According to CodeMentor MCP: ${msg}` }], isError: true };
+          return {
+            content: [
+              {
+                type: 'text' as const,
+                text: `⚠️ 🎓 According to CodeMentor MCP: ${msg}`,
+              },
+            ],
+            isError: true,
+          };
         }
       },
     );
@@ -607,7 +763,10 @@ export class McpService {
       'Searches code rules using BM25. Returns rules with prefix "🎓 According to CodeMentor MCP"',
       {
         query: z.string().describe('Search term'),
-        category: z.string().optional().describe('Category (nestjs, angular, typescript)'),
+        category: z
+          .string()
+          .optional()
+          .describe('Category (nestjs, angular, typescript)'),
         limit: z.number().default(5).describe('Maximum number of results'),
       },
       async ({ query, category, limit }, extra) => {
@@ -615,8 +774,12 @@ export class McpService {
         const sessionId = extra?.sessionId || 'unknown';
 
         // Get user info from Redis (stored during session creation)
-        const userId = await this.redisService.get<string>(`session:${sessionId}:userId`);
-        const ipAddress = await this.redisService.get<string>(`session:${sessionId}:ip`);
+        const userId = await this.redisService.get<string>(
+          `session:${sessionId}:userId`,
+        );
+        const ipAddress = await this.redisService.get<string>(
+          `session:${sessionId}:ip`,
+        );
 
         // Create session in DB on first tool use (meaningful interaction)
         if (userId) {
@@ -629,7 +792,9 @@ export class McpService {
           );
         }
 
-        this.logger.log(`🔍 MCP: search_rules called - query="${query}", category=${category}, limit=${limit}`);
+        this.logger.log(
+          `🔍 MCP: search_rules called - query="${query}", category=${category}, limit=${limit}`,
+        );
         try {
           const url = `http://localhost:${this.apiPort}/rules/search?q=${encodeURIComponent(query)}${
             category ? `&category=${category}` : ''
@@ -637,12 +802,22 @@ export class McpService {
           const response = await fetch(url);
           const data = await response.json();
           const text = this.formatResponse('search', data);
-          this.logger.log(`✅ MCP: search_rules completed - ${data.results?.length || 0} results`);
+          this.logger.log(
+            `✅ MCP: search_rules completed - ${data.results?.length || 0} results`,
+          );
           return { content: [{ type: 'text' as const, text }] };
         } catch (error) {
           const msg = error instanceof Error ? error.message : 'Error';
           this.logger.error(`❌ MCP: search_rules failed - ${msg}`);
-          return { content: [{ type: 'text' as const, text: `⚠️ 🎓 According to CodeMentor MCP: ${msg}` }], isError: true };
+          return {
+            content: [
+              {
+                type: 'text' as const,
+                text: `⚠️ 🎓 According to CodeMentor MCP: ${msg}`,
+              },
+            ],
+            isError: true,
+          };
         }
       },
     );
@@ -656,23 +831,29 @@ export class McpService {
       },
       async ({ id }, extra) => {
         const sessionId = extra?.sessionId || 'unknown';
-        const userId = await this.redisService.get<string>(`session:${sessionId}:userId`);
-        const ipAddress = await this.redisService.get<string>(`session:${sessionId}:ip`);
+        const userId = await this.redisService.get<string>(
+          `session:${sessionId}:userId`,
+        );
+        const ipAddress = await this.redisService.get<string>(
+          `session:${sessionId}:ip`,
+        );
 
         // Create session in DB on first tool use
         if (userId) {
           await this.getOrCreateSessionForToolUse(
-            sessionId, 
-            userId, 
-            'get_rule', 
-            ipAddress ? `ip-${ipAddress}` : undefined, 
+            sessionId,
+            userId,
+            'get_rule',
+            ipAddress ? `ip-${ipAddress}` : undefined,
             ipAddress || undefined,
           );
         }
 
         this.logger.log(`📖 MCP: get_rule called - id=${id}`);
         try {
-          const response = await fetch(`http://localhost:${this.apiPort}/rules?id=${encodeURIComponent(id)}`);
+          const response = await fetch(
+            `http://localhost:${this.apiPort}/rules?id=${encodeURIComponent(id)}`,
+          );
           const data = await response.json();
           const text = this.formatResponse('get', data);
           this.logger.log(`✅ MCP: get_rule completed`);
@@ -680,7 +861,15 @@ export class McpService {
         } catch (error) {
           const msg = error instanceof Error ? error.message : 'Error';
           this.logger.error(`❌ MCP: get_rule failed - ${msg}`);
-          return { content: [{ type: 'text' as const, text: `⚠️ 🎓 According to CodeMentor MCP: ${msg}` }], isError: true };
+          return {
+            content: [
+              {
+                type: 'text' as const,
+                text: `⚠️ 🎓 According to CodeMentor MCP: ${msg}`,
+              },
+            ],
+            isError: true,
+          };
         }
       },
     );
@@ -695,36 +884,52 @@ export class McpService {
       },
       async ({ category, limit }, extra) => {
         const sessionId = extra?.sessionId || 'unknown';
-        const userId = await this.redisService.get<string>(`session:${sessionId}:userId`);
-        const ipAddress = await this.redisService.get<string>(`session:${sessionId}:ip`);
+        const userId = await this.redisService.get<string>(
+          `session:${sessionId}:userId`,
+        );
+        const ipAddress = await this.redisService.get<string>(
+          `session:${sessionId}:ip`,
+        );
 
         // Create session in DB on first tool use
         if (userId) {
           await this.getOrCreateSessionForToolUse(
-            sessionId, 
-            userId, 
-            'list_rules', 
-            ipAddress ? `ip-${ipAddress}` : undefined, 
+            sessionId,
+            userId,
+            'list_rules',
+            ipAddress ? `ip-${ipAddress}` : undefined,
             ipAddress || undefined,
           );
         }
 
-        this.logger.log(`📋 MCP: list_rules llamado - category=${category}, limit=${limit}`);
+        this.logger.log(
+          `📋 MCP: list_rules llamado - category=${category}, limit=${limit}`,
+        );
         try {
           const params = new URLSearchParams();
           if (category) params.set('category', category);
           params.set('limit', String(limit || 50));
-          
+
           const url = `http://localhost:${this.apiPort}/rules?${params.toString()}`;
           const response = await fetch(url);
           const data = await response.json();
           const text = this.formatResponse('list', data);
-          this.logger.log(`✅ MCP: list_rules completado - ${data.rules?.length || 0} reglas`);
+          this.logger.log(
+            `✅ MCP: list_rules completado - ${data.rules?.length || 0} reglas`,
+          );
           return { content: [{ type: 'text' as const, text }] };
         } catch (error) {
           const msg = error instanceof Error ? error.message : 'Error';
           this.logger.error(`❌ MCP: list_rules falló - ${msg}`);
-          return { content: [{ type: 'text' as const, text: `⚠️ 🎓 Según CodeMentor MCP: ${msg}` }], isError: true };
+          return {
+            content: [
+              {
+                type: 'text' as const,
+                text: `⚠️ 🎓 Según CodeMentor MCP: ${msg}`,
+              },
+            ],
+            isError: true,
+          };
         }
       },
     );
