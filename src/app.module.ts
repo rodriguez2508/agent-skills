@@ -35,6 +35,7 @@ import { AnalysisAgent } from '@agents/analysis/analysis.agent';
 import { MetricsAgent } from '@agents/metrics/metrics.agent';
 import { PMAgent } from '@agents/pm/pm.agent';
 import { IssueWorkflowAgent } from '@agents/workflow/issue-workflow.agent';
+import { GitHubAgent } from '@agents/github/github.agent';
 
 // Domain
 import { RULE_REPOSITORY } from '@core/domain/ports/rule-repository.token';
@@ -44,6 +45,8 @@ import { AuthModule } from '@modules/auth/auth.module';
 import { UsersModule } from '@modules/users/users.module';
 import { SessionsModule } from '@modules/sessions/sessions.module';
 import { IssuesModule } from '@modules/issues/issues.module';
+import { ProjectsModule } from '@modules/projects/projects.module';
+import { ContextsModule } from '@modules/contexts/contexts.module';
 import { AuthController } from '@modules/auth/presentation/controllers/auth.controller';
 
 // Middleware
@@ -68,6 +71,8 @@ import { IpTrackerMiddleware } from '@shared/middleware/ip-tracker.middleware';
     UsersModule,
     SessionsModule,
     IssuesModule,
+    ProjectsModule,
+    ContextsModule,
   ],
   controllers: [
     HealthController,
@@ -91,7 +96,7 @@ import { IpTrackerMiddleware } from '@shared/middleware/ip-tracker.middleware';
     AgentRegistry,
     RouterAgent,
 
-    // Specialized Agents (9 agentes)
+    // Specialized Agents (10 agentes)
     SearchAgent,
     IdentityAgent,
     RulesAgent,
@@ -101,6 +106,7 @@ import { IpTrackerMiddleware } from '@shared/middleware/ip-tracker.middleware';
     MetricsAgent,
     PMAgent,
     IssueWorkflowAgent,
+    GitHubAgent,
 
     // CQRS Handlers
     SearchRulesHandler,
@@ -124,6 +130,7 @@ export class AppModule implements OnModuleInit {
     private readonly metricsAgent: MetricsAgent,
     private readonly pmAgent: PMAgent,
     private readonly issueWorkflowAgent: IssueWorkflowAgent,
+    private readonly gitHubAgent: GitHubAgent,
     private readonly rulesEngine: RulesEngine,
   ) {}
 
@@ -141,6 +148,7 @@ export class AppModule implements OnModuleInit {
     this.agentRegistry.register(this.metricsAgent);
     this.agentRegistry.register(this.pmAgent);
     this.agentRegistry.register(this.issueWorkflowAgent);
+    this.agentRegistry.register(this.gitHubAgent);
 
     // Register agents in the router
     this.routerAgent.registerAllAgents();

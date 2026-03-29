@@ -418,8 +418,10 @@ export class IssueWorkflowAgent extends BaseAgent {
     );
     await this.issueService.addKeyDecision(
       issueId,
-      'Análisis completado',
-      `Analizado: ${input.substring(0, 100)}`,
+      {
+        decision: 'Análisis completado',
+        rationale: `Analizado: ${input.substring(0, 100)}`,
+      },
     );
 
     return {

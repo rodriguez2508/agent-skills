@@ -11,6 +11,9 @@ import { MessageRole } from '@modules/sessions/domain/entities/chat-message.enti
 import { SessionStatus } from '@modules/sessions/domain/entities/session.entity';
 import { IssueService } from '@modules/issues/application/services/issue.service';
 import { IssueStatus } from '@modules/issues/domain/entities/issue.entity';
+import { ProjectsService } from '@modules/projects/application/services/projects.service';
+import { ContextService } from '@modules/contexts/application/services/context.service';
+import { ContextType } from '@modules/contexts/domain/entities/context.entity';
 
 export interface McpSession {
   server: McpServer;
@@ -31,6 +34,8 @@ export class McpService {
     private readonly userRepository: UserRepository,
     private readonly redisService: RedisService,
     private readonly issueService: IssueService,
+    private readonly projectsService: ProjectsService,
+    private readonly contextService: ContextService,
   ) {
     this.apiPort = this.configService.get<number>('PORT', 8004);
   }
@@ -158,9 +163,35 @@ export class McpService {
     );
 
     this.registerTools(server);
+    this.registerPrompts(server);
 
     // Connect server to transport
     await server.connect(transport);
+
+    // Send initial system message via SSE to instruct the client to use tools
+    try {
+      const systemMessage = {
+        role: 'system',
+        content: `You are connected to CodeMentor MCP. 
+
+IMPORTANT: You MUST use the MCP tools for all questions and work requests:
+- Use 'agent_query' tool for any question, implementation, analysis, or research
+- The system automatically creates issues for work tasks
+- Use 'search_rules' to find relevant code rules
+
+When a user asks to implement, analyze, create, fix, or research something, you MUST call the 'agent_query' tool with the user's message.
+
+Issue tracking is enabled for this session.`,
+      };
+
+      // Send as an SSE event
+      res.write(
+        `data: ${JSON.stringify({ type: 'system', message: systemMessage })}\n\n`,
+      );
+      this.logger.log('✅ MCP: Sent initial system instructions to client');
+    } catch (error) {
+      this.logger.warn(`⚠️ Failed to send initial message: ${error.message}`);
+    }
 
     // Transport generates its own sessionId
     const transportSessionId = transport.sessionId;
@@ -323,6 +354,60 @@ export class McpService {
       `✅ MCP: Session ${existingSessionId ? 'REUSED' : 'CREATED'}: ${finalSessionId}`,
     );
 
+    // STEP 5: Create issue automatically for this session (for tracking work)
+    try {
+      // Check if session already has an issue
+      const session =
+        await this.sessionRepository.findBySessionId(finalSessionId);
+
+      if (session && !session.issueId) {
+        const title = `MCP Session - ${ipAddress} - ${new Date().toISOString().substring(0, 10)}`;
+
+        const issue = await this.issueService.createIssue({
+          title,
+          description: `Auto-created issue for MCP session. Session started from IP: ${ipAddress}`,
+          userId,
+          sessionId: finalSessionId,
+          metadata: {
+            autoCreated: true,
+            source: 'mcp-session-init',
+            clientIp: ipAddress,
+            clientId,
+            createdAt: new Date().toISOString(),
+          },
+        });
+
+        // Link issue to session
+        await this.sessionRepository
+          .getRepository()
+          .update({ sessionId: finalSessionId }, { issueId: issue.id });
+
+        // Store in Redis
+        await this.redisService.set(
+          `session:${finalSessionId}:issueId`,
+          issue.id,
+          86400,
+        );
+
+        this.logger.log(
+          `✅ Issue auto-created for session: ${issue.id} (${issue.issueId}) - title: "${title}"`,
+        );
+      } else if (session?.issueId) {
+        // Restore issue mapping to Redis
+        await this.redisService.set(
+          `session:${finalSessionId}:issueId`,
+          session.issueId,
+          86400,
+        );
+        this.logger.log(
+          `♻️ Issue already exists for session: ${session.issueId}`,
+        );
+      }
+    } catch (error) {
+      this.logger.error(`Error creating issue for session: ${error.message}`);
+      // Don't fail session creation if issue creation fails
+    }
+
     // Cleanup when connection closes
     res.on('close', () => {
       this.closeSession(transportSessionId);
@@ -442,90 +527,598 @@ export class McpService {
   }
 
   /**
-   * Automatically creates or gets an issue for the current session
-   * Called on first user message to track conversation context
+   * Process user message: detect project, intention, create issue if work, save to context
+   *
+   * Flow:
+   * 1. Detect project from message
+   * 2. Find or create project in DB
+   * 3. Detect intention (work vs analysis)
+   * 4. If work intention -> create issue
+   * 5. Save message to Context (always, even without issue)
+   */
+  async processUserMessage(
+    sessionId: string,
+    userId: string,
+    userMessage: string,
+  ): Promise<{
+    projectId: string | null;
+    issueId: string | null;
+    contextId: string | null;
+  }> {
+    try {
+      const session = await this.sessionRepository.findBySessionId(sessionId);
+
+      // STEP 1: Detect project name FIRST
+      const projectName = await this.detectProjectName(userMessage);
+      this.logger.log(`🔍 Detected project: ${projectName || 'unknown'}`);
+
+      // STEP 2: Check if session already has an issue linked
+      // This is critical - we don't want to create multiple issues per session!
+      const existingIssueId =
+        session?.issueId ||
+        (await this.redisService.get<string>(`session:${sessionId}:issueId`));
+
+      if (existingIssueId) {
+        this.logger.log(
+          `♻️ Session already has issue: ${existingIssueId}. Reusing existing issue.`,
+        );
+
+        // Still detect and link project if not already done
+        if (projectName && !session?.projectId) {
+          const project = await this.projectsService.findOrCreateProject({
+            name: projectName,
+            userId,
+            metadata: {
+              detectedFrom: 'mcp-message',
+              initialMessage: userMessage.substring(0, 200),
+            },
+          });
+
+          await this.sessionRepository
+            .getRepository()
+            .update({ sessionId }, { projectId: project.id });
+
+          await this.redisService.set(
+            `session:${sessionId}:projectId`,
+            project.id,
+            3600,
+          );
+
+          this.logger.log(
+            `🔗 Project linked to existing issue: ${project.name}`,
+          );
+        }
+
+        return {
+          projectId: session?.projectId || null,
+          issueId: existingIssueId,
+          contextId: null,
+        };
+      }
+
+      // STEP 3: Find or create project
+      let projectId: string | null = null;
+
+      if (projectName) {
+        const project = await this.projectsService.findOrCreateProject({
+          name: projectName,
+          userId,
+          metadata: {
+            detectedFrom: 'mcp-message',
+            initialMessage: userMessage.substring(0, 200),
+          },
+        });
+        projectId = project.id;
+
+        // Link project to session
+        if (session) {
+          await this.sessionRepository
+            .getRepository()
+            .update({ sessionId }, { projectId });
+          this.logger.log(`🔗 Project linked to session: ${projectName}`);
+        }
+
+        // Cache project in Redis
+        await this.redisService.set(
+          `session:${sessionId}:projectId`,
+          projectId,
+          3600,
+        );
+      }
+
+      // STEP 4: Detect intention (work vs analysis)
+      const intention = this.detectIntention(userMessage);
+      this.logger.log(`🎯 Detected intention: ${intention}`);
+
+      // STEP 5: If work intention AND no existing issue -> create issue
+      let issueId: string | null = null;
+      let contextId: string | null = null;
+
+      if (intention === 'work') {
+        // Generate contextual issue ID with project name
+        const title = this.generateIssueTitle(userMessage);
+        const contextualIssueId = projectName
+          ? `${projectName.toLowerCase()}-${Date.now().toString(36).substring(0, 6)}`
+          : `issue-${Date.now()}`;
+
+        this.logger.log(
+          `📋 Creating issue: ${contextualIssueId} | projectName: ${projectName || 'none'}`,
+        );
+
+        const issue = await this.issueService.createIssue({
+          title,
+          description: `Created from MCP conversation. Initial message: "${userMessage.substring(0, 500)}"`,
+          userId,
+          sessionId,
+          projectId: projectId || undefined,
+          metadata: {
+            autoCreated: true,
+            source: 'mcp-work-intention',
+            createdAt: new Date().toISOString(),
+            initialMessage: userMessage,
+            projectName: projectName || undefined,
+            contextualIssueId,
+          },
+        });
+
+        issueId = issue.id;
+
+        // Link issue to session
+        if (session && issueId) {
+          await this.sessionRepository
+            .getRepository()
+            .update({ sessionId }, { issueId });
+        }
+
+        // Cache in Redis
+        if (issueId) {
+          await this.redisService.set(
+            `session:${sessionId}:issueId`,
+            issueId,
+            3600,
+          );
+        }
+
+        this.logger.log(
+          `✅ Issue created: ${issue.issueId} (${title}) | Project: ${projectName || 'none'}`,
+        );
+
+        // STEP 5: Create Context for this issue
+        const contextType =
+          await this.contextService.detectContextType(userMessage);
+
+        const context = await this.contextService.createContext({
+          issueId: issueId!,
+          type: contextType,
+          summary: title,
+          messages: [
+            {
+              role: 'user' as const,
+              content: userMessage,
+              timestamp: new Date().toISOString(),
+            },
+          ],
+          metadata: {
+            projectName: projectName || undefined,
+          },
+        });
+
+        contextId = context.id;
+
+        // Cache context in Redis
+        await this.redisService.set(
+          `session:${sessionId}:contextId`,
+          contextId,
+          3600,
+        );
+
+        this.logger.log(
+          `📝 Context created: ${context.contextId} for issue ${issue.issueId}`,
+        );
+      } else {
+        // Analysis intention - just save to context without issue
+        // Get existing issue from session if any
+        const existingIssueId =
+          session?.issueId ||
+          (await this.redisService.get<string>(`session:${sessionId}:issueId`));
+
+        if (existingIssueId) {
+          // Add message to existing context
+          const activeContext =
+            await this.contextService.getActiveContext(existingIssueId);
+          if (activeContext) {
+            await this.contextService.addMessage(
+              activeContext.id,
+              'user',
+              userMessage,
+            );
+            contextId = activeContext.id;
+            this.logger.log(
+              `📝 Message added to existing context: ${activeContext.contextId}`,
+            );
+          } else {
+            // Create new context for analysis
+            const contextType =
+              await this.contextService.detectContextType(userMessage);
+            const context = await this.contextService.createContext({
+              issueId: existingIssueId,
+              type: contextType,
+              summary: `Analysis: ${userMessage.substring(0, 50)}...`,
+              messages: [
+                {
+                  role: 'user' as const,
+                  content: userMessage,
+                  timestamp: new Date().toISOString(),
+                },
+              ],
+              metadata: {
+                projectName: projectName || undefined,
+                isAnalysis: true,
+              },
+            });
+            contextId = context.id;
+            await this.redisService.set(
+              `session:${sessionId}:contextId`,
+              contextId,
+              3600,
+            );
+            this.logger.log(
+              `📝 Analysis context created: ${context.contextId}`,
+            );
+          }
+        } else {
+          // No issue yet - create analysis-only context (temporarily without issue)
+          const contextType =
+            await this.contextService.detectContextType(userMessage);
+          const context = await this.contextService.createContext({
+            issueId: undefined as any, // Will be linked later when issue is created
+            type: contextType,
+            summary: `Analysis: ${userMessage.substring(0, 50)}...`,
+            messages: [
+              {
+                role: 'user' as const,
+                content: userMessage,
+                timestamp: new Date().toISOString(),
+              },
+            ],
+            metadata: {
+              projectName: projectName || undefined,
+              projectId: projectId || undefined,
+              isAnalysis: true,
+              pendingIssue: true, // Mark as pending issue creation
+            },
+          });
+          contextId = context.id;
+          await this.redisService.set(
+            `session:${sessionId}:contextId`,
+            contextId,
+            3600,
+          );
+          this.logger.log(
+            `📝 Analysis context created (pending issue): ${context.contextId}`,
+          );
+        }
+      }
+
+      return { projectId, issueId, contextId };
+    } catch (error) {
+      this.logger.error(`Error processing user message: ${error.message}`);
+      return { projectId: null, issueId: null, contextId: null };
+    }
+  }
+
+  /**
+   * Legacy method - redirects to processUserMessage
    */
   async getOrCreateIssueForSession(
     sessionId: string,
     userId: string,
     userMessage: string,
+    projectNameFromContext?: string,
   ): Promise<string | null> {
+    const result = await this.processUserMessage(
+      sessionId,
+      userId,
+      userMessage,
+    );
+    return result.issueId;
+  }
+
+  /**
+   * Detect if user message indicates work intention vs analysis
+   */
+  private detectIntention(userMessage: string): 'work' | 'analysis' {
+    const lower = userMessage.toLowerCase();
+
+    // Keywords that indicate work intention (create issue)
+    const workKeywords = [
+      'implementar',
+      'implement',
+      'crear',
+      'create',
+      'agregar',
+      'add',
+      'migrar',
+      'migrate',
+      'hacer',
+      'make',
+      'build',
+      'construir',
+      'fix',
+      'bug',
+      'arreglar',
+      'corregir',
+      'resolver',
+      'desarrollar',
+      'develop',
+      'trabajar',
+      'work on',
+      'refactorizar',
+      'refactor',
+      'mejorar',
+      'improve',
+      'actualizar',
+      'update',
+      'modificar',
+      'modify',
+      'convertir',
+      'convert',
+      'transformar',
+      'transform',
+    ];
+
+    // Keywords that indicate analysis only (no issue)
+    const analysisKeywords = [
+      'analizar',
+      'analyze',
+      'analisis',
+      'analysis',
+      'buscar',
+      'search',
+      'busca',
+      'find',
+      'investigar',
+      'research',
+      'investiga',
+      'consultar',
+      'consult',
+      'consulta',
+      'revisar',
+      'review',
+      'revisa',
+      'explicar',
+      'explain',
+      'explica',
+      'dime',
+      'tell me',
+      'que hay',
+      'what is',
+      'como funciona',
+      'how does',
+      'como es',
+      'que hay de',
+      'what about',
+    ];
+
+    // Check for work keywords first
+    for (const keyword of workKeywords) {
+      if (lower.includes(keyword)) {
+        return 'work';
+      }
+    }
+
+    // Check for analysis-only keywords
+    for (const keyword of analysisKeywords) {
+      if (lower.includes(keyword)) {
+        return 'analysis';
+      }
+    }
+
+    // Default to analysis if unclear
+    return 'analysis';
+  }
+
+  /**
+   * Detects project name dynamically from multiple sources
+   * Priority: 1. Working Directory, 2. Message content
+   */
+  private async detectProjectName(
+    userMessage: string,
+    projectNameFromContext?: string,
+  ): Promise<string | null> {
+    // 1. Use explicitly provided project name
+    if (projectNameFromContext) {
+      return projectNameFromContext;
+    }
+
+    // 2. Try to detect from working directory (PWD)
+    const projectFromCwd = this.extractProjectFromWorkingDirectory();
+    if (projectFromCwd) {
+      this.logger.debug(`🔍 Project detected from PWD: ${projectFromCwd}`);
+      return projectFromCwd;
+    }
+
+    // 3. Try to detect from user message
+    const projectFromMessage = this.extractProjectFromMessage(userMessage);
+    if (projectFromMessage) {
+      this.logger.debug(
+        `🔍 Project detected from message: ${projectFromMessage}`,
+      );
+      return projectFromMessage;
+    }
+
+    this.logger.debug(`🔍 No project detected from PWD or message`);
+    return null;
+  }
+
+  /**
+   * Extracts project name from the current working directory
+   * Example: /home/aajcr/PROYECTOS/LINKI/linki-f → linki-f
+   */
+  private extractProjectFromWorkingDirectory(): string | null {
     try {
-      // Check if session already has an issue linked
-      const session = await this.sessionRepository.findBySessionId(sessionId);
+      const cwd = process.cwd();
+      if (!cwd) return null;
 
-      if (session?.issueId) {
-        this.logger.debug(`♻️ Session already has issue: ${session.issueId}`);
-        return session.issueId;
+      // Get the last segment of the path (project name)
+      const pathParts = cwd
+        .split('/')
+        .filter((p) => p && p !== 'home' && p !== 'PROYECTOS');
+
+      // Return the most relevant path segment (usually the last one)
+      if (pathParts.length > 0) {
+        const lastPart = pathParts[pathParts.length - 1];
+        // Clean up: remove dashes, etc but keep the name
+        return lastPart.trim();
       }
 
-      // Check Redis for cached issueId
-      const cachedIssueId = await this.redisService.get<string>(
-        `session:${sessionId}:issueId`,
-      );
-      if (cachedIssueId) {
-        this.logger.debug(`♻️ Issue found in Redis: ${cachedIssueId}`);
-        return cachedIssueId;
-      }
-
-      // Generate issue title from user message (first 100 chars)
-      const title =
-        userMessage.substring(0, 100) + (userMessage.length > 100 ? '...' : '');
-
-      // Create new issue automatically
-      const issue = await this.issueService.createIssue({
-        title,
-        description: `Auto-created from MCP conversation. Initial message: "${userMessage.substring(0, 200)}"`,
-        userId,
-        sessionId,
-        metadata: {
-          autoCreated: true,
-          source: 'mcp-conversation',
-          createdAt: new Date().toISOString(),
-          initialMessage: userMessage,
-        },
-      });
-
-      // Link issue to session
-      if (session) {
-        await this.sessionRepository
-          .getRepository()
-          .update({ sessionId }, { issueId: issue.id });
-        this.logger.log(
-          `🔗 Issue linked to session: ${issue.issueId} -> ${sessionId}`,
-        );
-      }
-
-      // Cache in Redis
-      await this.redisService.set(
-        `session:${sessionId}:issueId`,
-        issue.id,
-        3600,
-      );
-      await this.redisService.set(
-        `issue:${issue.id}:sessionId`,
-        sessionId,
-        3600,
-      );
-
-      this.logger.log(
-        `✅ Issue auto-created for conversation: ${issue.issueId} (${title})`,
-      );
-
-      return issue.id;
-    } catch (error) {
-      this.logger.error(`Error creating/Getting issue: ${error.message}`);
       return null;
+    } catch (error) {
+      this.logger.warn(`Could not detect project from PWD: ${error.message}`);
+      return null;
+    }
+  }
+
+  /**
+   * Extracts project name from user message
+   * Patterns: "proyecto X", "project X", "del proyecto X"
+   */
+  private extractProjectFromMessage(message: string): string | null {
+    const lowerMessage = message.toLowerCase();
+
+    // Patterns to extract project name from message
+    const patterns = [
+      /(?:proyecto|project|del proyecto|del project|el proyecto)\s+([a-zA-Z0-9_-]+)/i,
+      /(?:trabajar en|work on|in)\s+([a-zA-Z0-9_-]+)/i,
+      /(?:analizar|analyze)\s+([a-zA-Z0-9_-]+)/i,
+    ];
+
+    for (const pattern of patterns) {
+      const match = message.match(pattern);
+      if (match && match[1]) {
+        const potentialProject = match[1].trim();
+        // Filter out common words that aren't project names
+        const excluded = [
+          'un',
+          'una',
+          'el',
+          'la',
+          'this',
+          'a',
+          'an',
+          'the',
+          'mi',
+          'my',
+          'tu',
+          'your',
+        ];
+        if (!excluded.includes(potentialProject.toLowerCase())) {
+          return potentialProject;
+        }
+      }
+    }
+
+    return null;
+  }
+
+  /**
+   * Generates a title from user message
+   */
+  private generateIssueTitle(userMessage: string): string {
+    // Clean up the message to create a meaningful title
+    let title = userMessage
+      .replace(/(quiero|necesito|por favor|please|can you|could you)/gi, '')
+      .replace(/\s+/g, ' ')
+      .trim();
+
+    if (title.length > 80) {
+      title = title.substring(0, 80) + '...';
+    }
+
+    return title.charAt(0).toUpperCase() + title.slice(1);
+  }
+
+  /**
+   * Register prompts to instruct Qwen to use MCP tools
+   */
+  private registerPrompts(server: McpServer) {
+    try {
+      server.prompt(
+        'system_instructions',
+        'System instructions for CodeMentor MCP',
+        {
+          description: z.string().optional(),
+        },
+        async ({ description }) => {
+          return {
+            messages: [
+              {
+                role: 'user',
+                content: {
+                  type: 'text',
+                  text: `You are CodeMentor AI assistant. You MUST use the MCP tools provided for ALL questions and tasks.
+
+IMPORTANT RULES:
+1. ALWAYS use 'agent_query' tool for any question, work request, or analysis
+2. The MCP provides code rules, project analysis, and specialized agents
+3. NEVER respond directly without using available tools when the user asks about:
+   - Implementing features
+   - Analyzing code or projects
+   - Creating or modifying code
+   - Debugging or fixing issues
+   - Any work-related task
+
+4. The system automatically creates issues for work tasks to track progress
+
+When in doubt, ALWAYS use the agent_query tool first.`,
+                },
+              },
+            ],
+          };
+        },
+      );
+
+      server.prompt(
+        'analyze_project',
+        'Prompt for analyzing the current project',
+        {
+          projectPath: z.string().optional(),
+        },
+        async ({ projectPath }) => {
+          return {
+            messages: [
+              {
+                role: 'user',
+                content: {
+                  type: 'text',
+                  text: `Analyze the project${projectPath ? ` at ${projectPath}` : ''}. Use the MCP tools to:
+1. Search for relevant code rules
+2. Use agent_query to get comprehensive analysis
+3. Identify architecture patterns
+4. Provide actionable recommendations`,
+                },
+              },
+            ],
+          };
+        },
+      );
+
+      this.logger.log('✅ MCP: Prompts registered');
+    } catch (error) {
+      this.logger.warn(`⚠️ Failed to register prompts: ${error.message}`);
     }
   }
 
   private registerTools(server: McpServer) {
     this.logger.log('🔧 MCP: Registering tools...');
 
-    // agent_query - MAIN TOOL! Routes to specialized agents (PM, Code, Architecture, etc.)
+    // Register prompts to instruct Qwen to use tools
+    this.registerPrompts(server);
+
+    // agent_query - MAIN TOOL! MUST be used for ALL questions and work requests
     server.tool(
       'agent_query',
-      'Main chat tool - Routes your message to a specialized agent (PM, Code, Architecture, Analysis, etc.). Use this for ALL questions and requests. Automatically creates issues when working on tasks.',
+      'MUST USE for ALL questions, work requests, code analysis, implementation, and research. Routes to specialized agents (PM, Code, Architecture, Analysis, GitHub). ALWAYS creates issues for any work task (implement, analyze, create, fix, build, research). Returns contextual responses with code rules from the project.',
       {
         message: z.string().describe('Your question or request'),
         context: z
@@ -538,10 +1131,11 @@ export class McpService {
           .describe('Session ID for conversation continuity'),
       },
       async ({ message, context, sessionId }, extra) => {
+        // Try multiple sources for sessionId: parameter, extra
         const sid = sessionId || extra?.sessionId || 'unknown';
 
         this.logger.log(
-          `💬 MCP: agent_query called - message="${message.substring(0, 100)}..."`,
+          `💬 MCP: agent_query called - message="${message.substring(0, 100)}..." | sessionId: ${sid}`,
         );
 
         try {
@@ -625,10 +1219,10 @@ export class McpService {
       },
     );
 
-    // chat_with_agents - Alias for agent_query (for backward compatibility)
+    // chat_with_agents - MUST USE for any question or work request
     server.tool(
       'chat_with_agents',
-      'Ask a question and get help from a specialized agent (PM, Code, Architecture, etc.). This is an alias for agent_query.',
+      'MUST USE for ALL questions and work requests. Get help from specialized agents (PM, Code, Architecture, Analysis, GitHub). Automatically creates issues for any task. Alias for agent_query - prefer agent_query instead.',
       {
         message: z.string().describe('Your question or request'),
         context: z
@@ -703,10 +1297,10 @@ export class McpService {
       },
     );
 
-    // auto_apply_rules - Automatically searches and applies relevant rules to user queries
+    // auto_apply_rules - MUST USE for code-related questions
     server.tool(
       'auto_apply_rules',
-      'Automatically searches and applies relevant code rules to the user query. This tool should be called on every user message to provide context-aware responses.',
+      'MUST USE for code-related questions. Searches and applies relevant code rules from the project. Provides context-aware responses with best practices. Always use this with agent_query for comprehensive answers.',
       {
         userQuery: z.string().describe("The user's question or request"),
         sessionId: z.string().optional().describe('Session ID for tracking'),
@@ -928,6 +1522,194 @@ export class McpService {
                 text: `⚠️ 🎓 Según CodeMentor MCP: ${msg}`,
               },
             ],
+            isError: true,
+          };
+        }
+      },
+    );
+
+    // ============================================
+    // GitHub Tools
+    // ============================================
+
+    // read_github_issue
+    server.tool(
+      'read_github_issue',
+      'Lee un issue de GitHub. Puedes especificar el número (#123) o la URL completa.',
+      {
+        issueRef: z.string().describe('Número del issue (#123) o URL completa'),
+        owner: z.string().optional().describe('Owner del repo (ej: owner)'),
+        repo: z.string().optional().describe('Nombre del repo (ej: repo)'),
+      },
+      async ({ issueRef, owner, repo }, extra) => {
+        const sessionId = extra?.sessionId || 'unknown';
+
+        this.logger.log(`🐙 MCP: read_github_issue - issueRef="${issueRef}"`);
+
+        try {
+          // Execute through agent
+          const response = await fetch(
+            `http://localhost:${this.apiPort}/mcp/chat`,
+            {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                input: `Lee el issue ${issueRef} de github.com/${owner || 'owner'}/${repo || 'repo'}`,
+                options: { sessionId, githubOwner: owner, githubRepo: repo },
+                sessionId,
+              }),
+            },
+          );
+
+          const result = await response.json();
+          const text = result.data?.message || 'Issue obtenido';
+          return { content: [{ type: 'text' as const, text }] };
+        } catch (error) {
+          const msg = error instanceof Error ? error.message : 'Error';
+          return {
+            content: [{ type: 'text' as const, text: `❌ Error: ${msg}` }],
+            isError: true,
+          };
+        }
+      },
+    );
+
+    // list_github_issues
+    server.tool(
+      'list_github_issues',
+      'Lista los issues de un repositorio de GitHub.',
+      {
+        owner: z.string().optional().describe('Owner del repo'),
+        repo: z.string().optional().describe('Nombre del repo'),
+        state: z
+          .enum(['open', 'closed', 'all'])
+          .default('open')
+          .describe('Estado de los issues'),
+      },
+      async ({ owner, repo, state }, extra) => {
+        const sessionId = extra?.sessionId || 'unknown';
+
+        this.logger.log(
+          `🐙 MCP: list_github_issues - owner=${owner}, repo=${repo}, state=${state}`,
+        );
+
+        try {
+          const response = await fetch(
+            `http://localhost:${this.apiPort}/mcp/chat`,
+            {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                input: `Lista los issues ${state} de github.com/${owner || 'owner'}/${repo || 'repo'}`,
+                options: { sessionId, githubOwner: owner, githubRepo: repo },
+                sessionId,
+              }),
+            },
+          );
+
+          const result = await response.json();
+          return {
+            content: [
+              { type: 'text' as const, text: result.data?.message || 'OK' },
+            ],
+          };
+        } catch (error) {
+          const msg = error instanceof Error ? error.message : 'Error';
+          return {
+            content: [{ type: 'text' as const, text: `❌ Error: ${msg}` }],
+            isError: true,
+          };
+        }
+      },
+    );
+
+    // read_github_pr
+    server.tool(
+      'read_github_pr',
+      'Lee un pull request de GitHub.',
+      {
+        prRef: z.string().describe('Número del PR (#123) o URL completa'),
+        owner: z.string().optional().describe('Owner del repo'),
+        repo: z.string().optional().describe('Nombre del repo'),
+      },
+      async ({ prRef, owner, repo }, extra) => {
+        const sessionId = extra?.sessionId || 'unknown';
+
+        this.logger.log(`🐙 MCP: read_github_pr - prRef="${prRef}"`);
+
+        try {
+          const response = await fetch(
+            `http://localhost:${this.apiPort}/mcp/chat`,
+            {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                input: `Lee el PR ${prRef} de github.com/${owner || 'owner'}/${repo || 'repo'}`,
+                options: { sessionId, githubOwner: owner, githubRepo: repo },
+                sessionId,
+              }),
+            },
+          );
+
+          const result = await response.json();
+          return {
+            content: [
+              {
+                type: 'text' as const,
+                text: result.data?.message || 'PR obtenido',
+              },
+            ],
+          };
+        } catch (error) {
+          const msg = error instanceof Error ? error.message : 'Error';
+          return {
+            content: [{ type: 'text' as const, text: `❌ Error: ${msg}` }],
+            isError: true,
+          };
+        }
+      },
+    );
+
+    // analyze_github_repo
+    server.tool(
+      'analyze_github_repo',
+      'Analiza un repositorio de GitHub y muestra estadísticas.',
+      {
+        owner: z.string().describe('Owner del repo'),
+        repo: z.string().describe('Nombre del repo'),
+      },
+      async ({ owner, repo }, extra) => {
+        const sessionId = extra?.sessionId || 'unknown';
+
+        this.logger.log(`🐙 MCP: analyze_github_repo - ${owner}/${repo}`);
+
+        try {
+          const response = await fetch(
+            `http://localhost:${this.apiPort}/mcp/chat`,
+            {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                input: `Analiza el repo github.com/${owner}/${repo}`,
+                options: { sessionId, githubOwner: owner, githubRepo: repo },
+                sessionId,
+              }),
+            },
+          );
+
+          const result = await response.json();
+          return {
+            content: [
+              {
+                type: 'text' as const,
+                text: result.data?.message || 'Análisis completado',
+              },
+            ],
+          };
+        } catch (error) {
+          const msg = error instanceof Error ? error.message : 'Error';
+          return {
+            content: [{ type: 'text' as const, text: `❌ Error: ${msg}` }],
             isError: true,
           };
         }

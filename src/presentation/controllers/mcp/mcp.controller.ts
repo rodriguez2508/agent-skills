@@ -212,11 +212,20 @@ export class McpController {
         const sessionId = args?.sessionId;
         const userId = args?.userId;
 
-        const response = await this.chat({
-          input,
-          sessionId,
-          options: { userId },
-        } as any);
+        // Create a minimal mock request object for IP resolution
+        const mockReq = {
+          ip: args?.clientIp || 'unknown',
+          headers: {},
+        } as Request;
+
+        const response = await this.chat(
+          {
+            input,
+            sessionId,
+            options: { userId },
+          } as any,
+          mockReq,
+        );
 
         return this.formatAgentResponse(response);
       }
@@ -330,8 +339,9 @@ export class McpController {
       options?: Record<string, any>;
       sessionId?: string;
     },
+    @Req() req: Request,
   ) {
-    const { input, options, sessionId } = body;
+    const { input, options, sessionId: providedSessionId } = body;
 
     if (!input || input.trim().length === 0) {
       return {
@@ -341,8 +351,15 @@ export class McpController {
       };
     }
 
+    // Get IP from request for fallback session handling
+    const clientIp =
+      req.ip || (req.headers['x-forwarded-for'] as string) || 'unknown';
+
+    // Resolve sessionId: use provided, or find by IP, or create new
+    const sessionId = await this.resolveSessionId(providedSessionId, clientIp);
+
     this.logger.log(
-      `💬 MCP Chat: User says "${input.substring(0, 100)}..." | sessionId: ${sessionId} | options: ${JSON.stringify(options)?.substring(0, 100)}`,
+      `💬 MCP Chat: User says "${input.substring(0, 100)}..." | sessionId: ${sessionId} | providedSessionId: ${providedSessionId} | clientIp: ${clientIp}`,
     );
 
     // Log start
@@ -351,13 +368,17 @@ export class McpController {
       inputLength: input.length,
       options,
       sessionId,
+      clientIp,
       hasWorkIntent: this.detectWorkIntent(input),
     });
 
-    // SAVE USER MESSAGE TO POSTGRESQL FIRST
-    if (sessionId) {
+    // SAVE USER MESSAGE TO POSTGRESQL FIRST (even if sessionId is fallback)
+    if (sessionId && sessionId !== 'unknown') {
       await this.mcpService
-        .saveChatMessage(sessionId, MessageRole.USER, input, { options })
+        .saveChatMessage(sessionId, MessageRole.USER, input, {
+          options,
+          clientIp,
+        })
         .catch((err) =>
           this.logger.warn(`Error saving user message: ${err.message}`),
         );
@@ -390,24 +411,58 @@ export class McpController {
           this.formatRulesContext(relevantRules) + previousRulesContext,
       };
 
-      // AUTO-CREATE ISSUE: Detect work intent and create issue if needed
-      const hasWorkIntent = this.detectWorkIntent(input);
+      // AUTO-CREATE ISSUE: Use the new logic in mcpService
+      // This now detects project and intention (work vs analysis)
       let issueIdForSession: string | null = null;
+      let projectIdForSession: string | null = null;
+      let contextIdForSession: string | null = null;
 
-      if (sessionId && hasWorkIntent) {
-        issueIdForSession = await this.getOrCreateIssueForSession(
-          sessionId,
-          input,
+      try {
+        // Get userId first
+        let userId = await this.redisService.get<string>(
+          `session:${sessionId}:userId`,
         );
-        this.agentLogger.info(
-          'MCP-Controller',
-          '🔧 Auto-created issue for work session',
-          {
-            issueId: issueIdForSession,
-            workIntent: hasWorkIntent,
+
+        if (!userId) {
+          const sessionData =
+            await this.mcpService['sessionRepository'].findBySessionId(
+              sessionId,
+            );
+          userId = sessionData?.userId || null;
+        }
+
+        if (userId) {
+          // Use the new processUserMessage method which handles:
+          // 1. Project detection
+          // 2. Intention detection (work vs analysis)
+          // 3. Issue creation (only for work)
+          // 4. Context creation
+          const result = await this.mcpService.processUserMessage(
+            sessionId,
+            userId,
             input,
-          },
-        );
+          );
+
+          issueIdForSession = result.issueId;
+          projectIdForSession = result.projectId;
+          contextIdForSession = result.contextId;
+
+          this.agentLogger.info(
+            'MCP-Controller',
+            issueIdForSession
+              ? '🔧 Issue created for work session'
+              : '🔍 Analysis mode (no issue)',
+            {
+              issueId: issueIdForSession,
+              projectId: projectIdForSession,
+              contextId: contextIdForSession,
+              input: input.substring(0, 100),
+              clientIp,
+            },
+          );
+        }
+      } catch (error) {
+        this.logger.error(`Error processing user message: ${error.message}`);
       }
 
       // Add issueId to options
@@ -418,7 +473,7 @@ export class McpController {
 
       // Activate RouterAgent to route to specialized agent WITH RULES CONTEXT
       this.logger.log(
-        `🔄 RouterAgent: Activating | input: "${input.substring(0, 80)}..." | rulesCount: ${relevantRules.length} | hasWorkIntent: ${hasWorkIntent} | issueId: ${issueIdForSession} | sessionId: ${sessionId}`,
+        `🔄 RouterAgent: Activating | input: "${input.substring(0, 80)}..." | rulesCount: ${relevantRules.length} | issueId: ${issueIdForSession} | sessionId: ${sessionId}`,
       );
 
       this.agentLogger.info(
@@ -428,8 +483,8 @@ export class McpController {
           inputLength: input.length,
           rulesCount: relevantRules.length,
           sessionId,
-          hasWorkIntent,
           issueId: issueIdForSession,
+          projectId: projectIdForSession,
         },
       );
 
@@ -830,12 +885,38 @@ export class McpController {
 
   /**
    * Gets or creates an issue for the session
+   * Includes fallback by IP when sessionId is invalid
    */
   private async getOrCreateIssueForSession(
     sessionId: string,
     input: string,
+    clientIp?: string,
   ): Promise<string | null> {
     try {
+      // Skip if sessionId is invalid
+      if (!sessionId || sessionId === 'unknown') {
+        this.logger.warn(
+          `⚠️ Invalid sessionId, attempting IP-based fallback | clientIp: ${clientIp}`,
+        );
+
+        // Try to find user by IP
+        if (clientIp) {
+          // Use findByIpOrCreate which handles both cases
+          const { user } = await this.mcpService[
+            'userRepository'
+          ].findByIpOrCreate({
+            ipAddress: clientIp,
+          });
+          return this.createIssueDirect(user.id, input, sessionId, clientIp);
+        }
+
+        this.logger.warn(
+          '⚠️ No clientIp available for fallback, cannot create issue',
+        );
+        return null;
+      }
+
+      // Check if issue already exists for session
       const existingIssueId = await this.redisService.get<string>(
         `session:${sessionId}:issueId`,
       );
@@ -846,18 +927,35 @@ export class McpController {
         return existingIssueId;
       }
 
-      const userId = await this.redisService.get<string>(
+      // Try to get userId from Redis
+      let userId = await this.redisService.get<string>(
         `session:${sessionId}:userId`,
       );
 
+      // Fallback: find user by session in DB if not in Redis
+      let session: any = null;
+      if (!userId) {
+        session =
+          await this.mcpService['sessionRepository'].findBySessionId(sessionId);
+        if (session?.userId) {
+          userId = session.userId;
+          // Restore to Redis
+          await this.redisService.set(
+            `session:${sessionId}:userId`,
+            userId,
+            3600,
+          );
+          this.logger.log(`♻️ Restored userId from DB: ${userId}`);
+        }
+      }
+
       this.logger.log(
-        `🔧 getOrCreateIssueForSession | sessionId: ${sessionId} | userId from Redis: ${userId} | input: "${input.substring(0, 80)}..."`,
+        `🔧 getOrCreateIssueForSession | sessionId: ${sessionId} | userId: ${userId} | clientIp: ${clientIp} | input: "${input.substring(0, 80)}..."`,
       );
 
       if (!userId) {
         this.logger.warn(
-          '⚠️ No userId found in Redis for session, cannot create issue | sessionId: ' +
-            sessionId,
+          `⚠️ No userId found for session ${sessionId} and IP ${clientIp}, cannot create issue`,
         );
         return null;
       }
@@ -872,11 +970,12 @@ export class McpController {
         title,
         description: `Issue created from MCP conversation: ${input.substring(0, 200)}`,
         userId,
-        sessionId,
+        sessionId: sessionId !== 'unknown' ? sessionId : undefined,
         metadata: {
           autoCreated: true,
           source: 'mcp-auto-detect',
           initialMessage: input,
+          clientIp,
         },
       });
 
@@ -899,6 +998,41 @@ export class McpController {
   }
 
   /**
+   * Helper to create issue directly with userId
+   */
+  private async createIssueDirect(
+    userId: string,
+    input: string,
+    sessionId: string,
+    clientIp?: string,
+  ): Promise<string | null> {
+    try {
+      const title = this.extractTitleFromInput(input);
+
+      const issueData = await this.mcpService['issueService'].createIssue({
+        title,
+        description: `Issue created from MCP conversation: ${input.substring(0, 200)}`,
+        userId,
+        sessionId: sessionId !== 'unknown' ? sessionId : undefined,
+        metadata: {
+          autoCreated: true,
+          source: 'mcp-ip-fallback',
+          initialMessage: input,
+          clientIp,
+        },
+      });
+
+      this.logger.log(
+        `✅ Auto-created issue (IP fallback): ${issueData.id} | issueId: ${issueData.issueId} | title: "${title}" | userId: ${userId} | clientIp: ${clientIp}`,
+      );
+      return issueData.id;
+    } catch (error: any) {
+      this.logger.error(`❌ Error creating issue (direct): ${error.message}`);
+      return null;
+    }
+  }
+
+  /**
    * Extracts a title from user input
    */
   private extractTitleFromInput(input: string): string {
@@ -909,5 +1043,97 @@ export class McpController {
       )
       .trim();
     return cleaned.charAt(0).toUpperCase() + cleaned.slice(1);
+  }
+
+  /**
+   * Resolves sessionId: uses provided, finds by IP, or creates new
+   */
+  private async resolveSessionId(
+    providedSessionId: string | undefined,
+    clientIp: string,
+  ): Promise<string> {
+    // 1. If valid provided sessionId, use it
+    if (providedSessionId && providedSessionId !== 'unknown') {
+      // Verify it exists in Redis or DB
+      const existsInRedis = await this.redisService.get(
+        `session:${providedSessionId}:userId`,
+      );
+      if (existsInRedis) {
+        this.logger.debug(`Using provided sessionId: ${providedSessionId}`);
+        return providedSessionId;
+      }
+      // Check DB
+      const session =
+        await this.mcpService['sessionRepository'].findBySessionId(
+          providedSessionId,
+        );
+      if (session && session.status === 'active') {
+        this.logger.debug(
+          `Using provided sessionId from DB: ${providedSessionId}`,
+        );
+        // Restore to Redis
+        const userId = session.userId;
+        if (userId) {
+          await this.redisService.set(
+            `session:${providedSessionId}:userId`,
+            userId,
+            3600,
+          );
+        }
+        return providedSessionId;
+      }
+    }
+
+    // 2. Try to find active session by IP in Redis
+    try {
+      const cachedSessionId = await this.redisService.get<string>(
+        `client:ip-${clientIp}:sessionId`,
+      );
+      if (cachedSessionId) {
+        const session =
+          await this.mcpService['sessionRepository'].findBySessionId(
+            cachedSessionId,
+          );
+        if (session && session.status === 'active') {
+          this.logger.log(
+            `♻️ Found active session by IP in Redis: ${cachedSessionId} for IP ${clientIp}`,
+          );
+          return cachedSessionId;
+        }
+      }
+    } catch (error) {
+      this.logger.warn(`Error finding session by IP in Redis: ${error}`);
+    }
+
+    // 3. Try to find in DB by IP
+    try {
+      const sessions =
+        await this.mcpService['sessionRepository'].getActiveSessions();
+      const matchingSession = sessions.find(
+        (s) =>
+          s.metadata?.clientIp === clientIp ||
+          s.metadata?.ipAddress === clientIp,
+      );
+      if (matchingSession) {
+        this.logger.log(
+          `♻️ Found active session by IP in DB: ${matchingSession.sessionId} for IP ${clientIp}`,
+        );
+        // Cache for next time
+        await this.redisService.set(
+          `client:ip-${clientIp}:sessionId`,
+          matchingSession.sessionId,
+          3600,
+        );
+        return matchingSession.sessionId;
+      }
+    } catch (error) {
+      this.logger.warn(`Error finding session by IP in DB: ${error}`);
+    }
+
+    // 4. Return provided or unknown - will create issue with user lookup
+    this.logger.warn(
+      `⚠️ No session found for IP ${clientIp}, using provided or fallback`,
+    );
+    return providedSessionId || 'unknown';
   }
 }

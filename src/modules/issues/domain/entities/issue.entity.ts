@@ -3,9 +3,9 @@
  *
  * Represents a GitHub/GitLab issue that the user is working on.
  * This is the MAIN entity for tracking work across sessions.
- * 
+ *
  * Hierarchy:
- * User → Issue → Session (with history) → ChatMessage
+ * User → Project → Issue → Context (multiple)
  */
 
 import {
@@ -44,7 +44,7 @@ export class Issue {
   @PrimaryGeneratedColumn('uuid')
   id: string;
 
-  @Column({ type: 'varchar', length: 50 })
+  @Column({ type: 'varchar', length: 50, name: 'issue_id' })
   @Index()
   issueId: string; // External issue ID (e.g., "123", "PROJ-123")
 
@@ -61,7 +61,12 @@ export class Issue {
   @Index()
   status: IssueStatus;
 
-  @Column({ type: 'varchar', length: 100, nullable: true })
+  @Column({
+    type: 'varchar',
+    length: 100,
+    name: 'current_workflow_step',
+    nullable: true,
+  })
   currentWorkflowStep: IssueWorkflowStep;
 
   @Column({ type: 'uuid', name: 'user_id', nullable: true })
@@ -72,7 +77,17 @@ export class Issue {
   @JoinColumn({ name: 'user_id' })
   user?: User;
 
-  @Column({ name: 'repository_url', type: 'varchar', length: 500, nullable: true })
+  // NEW: Direct FK to Project (no relation to avoid circular dependency)
+  @Column({ type: 'uuid', name: 'project_id', nullable: true })
+  @Index()
+  projectId?: string;
+
+  @Column({
+    name: 'repository_url',
+    type: 'varchar',
+    length: 500,
+    nullable: true,
+  })
   repositoryUrl?: string;
 
   @Column({ name: 'branch_name', type: 'varchar', length: 200, nullable: true })
@@ -99,6 +114,15 @@ export class Issue {
 
   @Column({ name: 'files_modified', type: 'text', array: true, nullable: true })
   filesModified?: string[];
+
+  @Column({ name: 'context', type: 'jsonb', nullable: true })
+  context?: {
+    interactions?: any[];
+    projectSnapshot?: any;
+    keyDecisions?: any[];
+    filesModified?: any[];
+    metadata?: Record<string, any>;
+  };
 
   @Column({ name: 'metadata', type: 'jsonb', nullable: true })
   metadata?: {

@@ -7,7 +7,11 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
-import { Issue, IssueStatus, IssueWorkflowStep } from '@modules/issues/domain/entities/issue.entity';
+import {
+  Issue,
+  IssueStatus,
+  IssueWorkflowStep,
+} from '@modules/issues/domain/entities/issue.entity';
 
 export interface CreateIssueDto {
   issueId: string;
@@ -15,6 +19,14 @@ export interface CreateIssueDto {
   description?: string;
   requirements?: string;
   userId?: string;
+  projectId?: string;
+  context?: {
+    interactions?: any[];
+    projectSnapshot?: any;
+    keyDecisions?: any[];
+    filesModified?: any[];
+    metadata?: Record<string, any>;
+  };
   metadata?: {
     labels?: string[];
     estimatedHours?: number;
@@ -125,7 +137,10 @@ export class IssueRepository {
       const issue = await this.findById(issueId);
       if (issue && issue.completedSteps) {
         if (!issue.completedSteps.includes(data.currentStep)) {
-          updateData.completedSteps = [...issue.completedSteps, data.currentStep];
+          updateData.completedSteps = [
+            ...issue.completedSteps,
+            data.currentStep,
+          ];
         }
       }
     }
@@ -136,17 +151,18 @@ export class IssueRepository {
 
   /**
    * Marks issue as in progress
+   * @param id - Internal UUID of the issue (not the external issueId like "ISSUE-123")
    */
-  async startWorking(issueId: string): Promise<Issue | null> {
+  async startWorking(id: string): Promise<Issue | null> {
     await this.repository.update(
-      { issueId },
+      { id },
       {
         status: IssueStatus.IN_PROGRESS,
         currentWorkflowStep: IssueWorkflowStep.READ,
         lastActivityAt: new Date(),
       },
     );
-    return this.findById(issueId);
+    return this.findById(id);
   }
 
   /**
@@ -166,6 +182,13 @@ export class IssueRepository {
 
     await this.repository.update({ issueId }, updateData);
     return this.findById(issueId);
+  }
+
+  /**
+   * Updates an issue
+   */
+  async update(issueId: string, data: Partial<Issue>): Promise<void> {
+    await this.repository.update(issueId, data);
   }
 
   /**

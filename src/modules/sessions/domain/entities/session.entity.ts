@@ -1,11 +1,11 @@
 /**
  * Session Entity
  *
- * Represents a chat session for a specific issue.
+ * Represents a chat session for a specific project/issue.
  * Contains complete conversation history in JSONB field.
- * 
+ *
  * Hierarchy:
- * User → Issue → Session (with history)
+ * User → Project → Session → Issue
  */
 
 import {
@@ -38,13 +38,21 @@ export class Session {
   @Index()
   sessionId: string; // External session ID (from MCP client)
 
-  @ManyToOne(() => User, (user) => user.sessions, { nullable: true, onDelete: 'SET NULL' })
+  @ManyToOne(() => User, (user) => user.sessions, {
+    nullable: true,
+    onDelete: 'SET NULL',
+  })
   @JoinColumn({ name: 'user_id' })
   @Index()
   user?: User;
 
   @Column({ name: 'user_id', nullable: true })
   userId?: string;
+
+  // NEW: Direct FK to Project (no relation to avoid circular dependency)
+  @Column({ type: 'uuid', name: 'project_id', nullable: true })
+  @Index()
+  projectId?: string;
 
   // NEW: Direct FK to Issue (no SessionPurpose intermediary)
   @Column({ type: 'uuid', name: 'issue_id', nullable: true })
@@ -64,10 +72,10 @@ export class Session {
   // DEPRECATED: purpose and purposeEntity removed (replaced by direct issue FK)
   // OLD: @Column({ name: 'purpose', type: 'varchar', nullable: true })
   // OLD: purpose?: string | null;
-  
+
   // OLD: @Column({ type: 'uuid', name: 'purpose_id', nullable: true })
   // OLD: purposeId?: string;
-  
+
   // OLD: @ManyToOne(() => SessionPurpose, { nullable: true, onDelete: 'SET NULL' })
   // OLD: purposeEntity?: SessionPurpose;
 

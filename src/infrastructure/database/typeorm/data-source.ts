@@ -1,8 +1,8 @@
 /**
  * TypeORM Data Source for Migrations
- * 
+ *
  * Used for generating and running migrations via CLI.
- * 
+ *
  * Usage:
  *   pnpm run db:generate -- src/infrastructure/database/typeorm/migrations/CreateTables
  *   pnpm run db:migrate
@@ -27,8 +27,26 @@ export const dataSourceOptions: DataSourceOptions = {
   password: process.env.DB_PASSWORD || 'postgres',
   database: process.env.DB_DATABASE || 'agent_skills',
   entities: [
-    path.join(__dirname, '../../../modules/users/domain/entities/*.entity{.ts,.js}'),
-    path.join(__dirname, '../../../modules/sessions/domain/entities/*.entity{.ts,.js}'),
+    path.join(
+      __dirname,
+      '../../../modules/users/domain/entities/*.entity{.ts,.js}',
+    ),
+    path.join(
+      __dirname,
+      '../../../modules/sessions/domain/entities/*.entity{.ts,.js}',
+    ),
+    path.join(
+      __dirname,
+      '../../../modules/projects/domain/entities/*.entity{.ts,.js}',
+    ),
+    path.join(
+      __dirname,
+      '../../../modules/issues/domain/entities/*.entity{.ts,.js}',
+    ),
+    path.join(
+      __dirname,
+      '../../../modules/contexts/domain/entities/*.entity{.ts,.js}',
+    ),
   ],
   migrations: [path.join(__dirname, '/migrations/*{.ts,.js}')],
   synchronize: false, // Never use synchronize with migrations

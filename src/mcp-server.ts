@@ -4,6 +4,8 @@ import {
   CallToolRequestSchema,
   ListToolsRequestSchema,
 } from '@modelcontextprotocol/sdk/types.js';
+import * as fs from 'fs/promises';
+import * as path from 'path';
 
 // MCP Server Configuration
 const server = new Server(
@@ -40,6 +42,10 @@ const TOOLS = [
         userId: {
           type: 'string',
           description: 'ID de usuario (opcional)',
+        },
+        projectPath: {
+          type: 'string',
+          description: 'Path al proyecto (auto-detect si no se proporciona)',
         },
       },
       required: ['input'],
@@ -120,6 +126,16 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         const input = args?.input as string;
         const sessionId = args?.sessionId as string | undefined;
         const userId = args?.userId as string | undefined;
+        const projectPath = args?.projectPath as string | undefined;
+
+        // Auto-detect project path if not provided
+        const detectedPath = projectPath || (await detectProjectPath());
+        
+        // Auto-detect project metadata
+        let projectContext = null;
+        if (detectedPath) {
+          projectContext = await detectProject(detectedPath);
+        }
 
         const session = sessionId || `session-${Date.now()}`;
 
@@ -129,7 +145,13 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           body: JSON.stringify({
             input,
             sessionId: session,
-            options: { userId },
+            projectPath: detectedPath,
+            projectContext,
+            options: { 
+              userId,
+              autoCreateIssue: true,
+              trackInteractions: true,
+            },
           }),
         });
 
@@ -138,7 +160,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         }
 
         const data = await response.json();
-        result = formatAgentResponse(data);
+        result = formatAgentResponse(data, { projectPath: detectedPath || undefined, projectContext });
         break;
       }
 
@@ -292,8 +314,9 @@ function truncateContent(content: string, maxLength: number): string {
 
 /**
  * Formats response from agent system with routing info, issues, etc.
+ * Now includes project context info
  */
-function formatAgentResponse(data: any): string {
+function formatAgentResponse(data: any, context?: { projectPath?: string; projectContext?: any }): string {
   const { data: responseData, metadata } = data;
 
   let text = '';
@@ -301,6 +324,22 @@ function formatAgentResponse(data: any): string {
   // Add main message
   if (responseData?.message) {
     text += `${responseData.message}\n\n`;
+  }
+
+  // Add project context info
+  if (context?.projectContext) {
+    text += `---\n📁 **Proyecto Detectado**:\n`;
+    text += `- Nombre: \`${context.projectContext.name}\`\n`;
+    if (context.projectContext.version) {
+      text += `- Versión: ${context.projectContext.version}\n`;
+    }
+    if (context.projectContext.detectedFramework) {
+      text += `- Framework: ${context.projectContext.detectedFramework}\n`;
+    }
+    if (context.projectContext.language) {
+      text += `- Lenguaje: ${context.projectContext.language}\n`;
+    }
+    text += '\n';
   }
 
   // Add agent routing info
@@ -376,11 +415,96 @@ function formatAgentResponse(data: any): string {
   return text.trim() || '✅ Consulta procesada exitosamente';
 }
 
+/**
+ * Detecta path del proyecto automáticamente
+ * Busca package.json desde directorio actual hacia arriba
+ */
+async function detectProjectPath(): Promise<string | null> {
+  let currentDir = process.cwd();
+  
+  while (currentDir !== path.parse(currentDir).root) {
+    const packageJsonPath = path.join(currentDir, 'package.json');
+    
+    try {
+      await fs.access(packageJsonPath);
+      return currentDir;
+    } catch {
+      currentDir = path.dirname(currentDir);
+    }
+  }
+  
+  return null;
+}
+
+/**
+ * Detecta metadata del proyecto
+ */
+async function detectProject(projectPath: string): Promise<any> {
+  try {
+    const packageJsonPath = path.join(projectPath, 'package.json');
+    const content = await fs.readFile(packageJsonPath, 'utf-8');
+    const packageJson = JSON.parse(content);
+
+    return {
+      name: packageJson.name,
+      version: packageJson.version,
+      dependencies: packageJson.dependencies,
+      devDependencies: packageJson.devDependencies,
+      detectedFramework: detectFramework(packageJson),
+      language: detectLanguage(packageJson),
+    };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Detecta framework basado en dependencias
+ */
+function detectFramework(packageJson: any): string {
+  const deps = {
+    ...packageJson.dependencies,
+    ...packageJson.devDependencies,
+  };
+
+  if (deps['@angular/core']) return 'angular';
+  if (deps['@nestjs/common']) return 'nestjs';
+  if (deps['react']) return 'react';
+  if (deps['vue']) return 'vue';
+  if (deps['express']) return 'node-express';
+  if (deps['fastify']) return 'node-fastify';
+  if (deps['next']) return 'nextjs';
+  if (deps['nuxt']) return 'nuxtjs';
+
+  return 'node';
+}
+
+/**
+ * Detecta lenguaje principal
+ */
+function detectLanguage(packageJson: any): string {
+  if (
+    packageJson.dependencies?.['@angular/core'] ||
+    packageJson.dependencies?.['@nestjs/common']
+  ) {
+    return 'TypeScript';
+  }
+  
+  const hasTs = packageJson.dependencies?.['typescript'];
+  const hasJs = packageJson.dependencies?.['@babel/core'];
+  
+  if (hasTs) return 'TypeScript';
+  if (hasJs) return 'JavaScript';
+  
+  return 'Unknown';
+}
+
 // Start Server
 async function main() {
   const transport = new StdioServerTransport();
   await server.connect(transport);
   console.error('CodeMentor MCP Server running on stdio');
+  console.error(`Auto-detect project: ${process.cwd()}`);
 }
 
 main().catch((error) => {
