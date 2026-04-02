@@ -254,7 +254,33 @@ export class RouterAgent extends BaseAgent {
       return 'issue-workflow';
     }
 
-    // Patrones de búsqueda
+    // Patrones de búsqueda web (Exa AI)
+    if (
+      this.matchesPattern(lowerInput, [
+        'buscar en',
+        'busca en',
+        'search on',
+        'buscar en google',
+        'busca en google',
+        'buscar en internet',
+        'busca en internet',
+        'buscar en la web',
+        'busca en la web',
+        'web search',
+        'internet search',
+        'google search',
+        'que es',
+        'qué es',
+        'who is',
+        'what is',
+        'información sobre',
+        'info sobre',
+      ])
+    ) {
+      return 'web-search';
+    }
+
+    // Patrones de búsqueda local de reglas
     if (
       this.matchesPattern(lowerInput, [
         'buscar',
@@ -368,6 +394,7 @@ export class RouterAgent extends BaseAgent {
   private findSpecializedAgent(intention: string) {
     const agentMap: Record<string, string> = {
       search: 'SearchAgent',
+      'web-search': 'WebSearchAgent',
       code: 'CodeAgent',
       rules: 'RulesAgent',
       architecture: 'ArchitectureAgent',
