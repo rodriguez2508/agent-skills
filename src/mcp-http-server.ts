@@ -178,6 +178,62 @@ server.tool(
   },
 );
 
+// ============================================================================
+// HERRAMIENTA: web_search - Búsqueda web con Exa AI
+// ============================================================================
+
+server.tool(
+  'web_search',
+  'Busca información en la web usando Exa AI. Útil para buscar documentación, ejemplos, soluciones a errores, etc.',
+  {
+    query: z.string().describe('Término de búsqueda'),
+    limit: z.number().default(10).describe('Número máximo de resultados'),
+  },
+  async ({ query, limit }) => {
+    try {
+      const url = `http://localhost:${PORT}/agents/web-search`;
+
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ input: query, limit }),
+      });
+
+      if (!response.ok) {
+        throw new Error(`API returned ${response.status}`);
+      }
+
+      const data = await response.json();
+
+      if (data.success && data.data?.formattedResults) {
+        return {
+          content: [
+            { type: 'text' as const, text: data.data.formattedResults },
+          ],
+        };
+      } else {
+        return {
+          content: [
+            {
+              type: 'text' as const,
+              text: data.data?.message || 'No results found',
+            },
+          ],
+          isError: !data.success,
+        };
+      }
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : 'Error';
+      return {
+        content: [
+          { type: 'text' as const, text: `⚠️ Web search error: ${msg}` },
+        ],
+        isError: true,
+      };
+    }
+  },
+);
+
 // Configurar Express
 const app: Express = express();
 app.use(express.json());

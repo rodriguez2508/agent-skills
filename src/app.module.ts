@@ -17,6 +17,7 @@ import { DatabaseModule } from '@infrastructure/database/database.module';
 import { HealthController } from '@presentation/controllers/health/health.controller';
 import { RulesController } from '@presentation/controllers/rules/rules.controller';
 import { McpController } from '@presentation/controllers/mcp/mcp.controller';
+import { AgentsController } from '@presentation/controllers/agents/agents.controller';
 
 // Application Handlers (CQRS)
 import { SearchRulesHandler } from '@application/queries/search-rules/search-rules.handler';
@@ -36,6 +37,11 @@ import { MetricsAgent } from '@agents/metrics/metrics.agent';
 import { PMAgent } from '@agents/pm/pm.agent';
 import { IssueWorkflowAgent } from '@agents/workflow/issue-workflow.agent';
 import { GitHubAgent } from '@agents/github/github.agent';
+import { FrontendArchitectureAgent } from '@agents/frontend-architecture/frontend-architecture.agent';
+import { FrontendArchitectureModule } from '@agents/frontend-architecture/frontend-architecture.module';
+import { WebSearchAgent } from '@agents/web-search/web-search.agent';
+import { WebSearchModule } from '@agents/web-search/web-search.module';
+import { SearchModule } from '@infrastructure/adapters/search/search.module';
 
 // Domain
 import { RULE_REPOSITORY } from '@core/domain/ports/rule-repository.token';
@@ -65,6 +71,7 @@ import { IpTrackerMiddleware } from '@shared/middleware/ip-tracker.middleware';
       type: 'inmemory', // Default for development, change to 'chromadb' for production
       global: true,
     }),
+    SearchModule,
 
     // New Modular Structure
     AuthModule,
@@ -73,12 +80,15 @@ import { IpTrackerMiddleware } from '@shared/middleware/ip-tracker.middleware';
     IssuesModule,
     ProjectsModule,
     ContextsModule,
+    FrontendArchitectureModule,
+    WebSearchModule,
   ],
   controllers: [
     HealthController,
     RulesController,
     McpController,
     AuthController,
+    AgentsController,
   ],
   providers: [
     // Infrastructure
@@ -107,6 +117,8 @@ import { IpTrackerMiddleware } from '@shared/middleware/ip-tracker.middleware';
     PMAgent,
     IssueWorkflowAgent,
     GitHubAgent,
+    FrontendArchitectureAgent,
+    WebSearchAgent,
 
     // CQRS Handlers
     SearchRulesHandler,
@@ -131,6 +143,8 @@ export class AppModule implements OnModuleInit {
     private readonly pmAgent: PMAgent,
     private readonly issueWorkflowAgent: IssueWorkflowAgent,
     private readonly gitHubAgent: GitHubAgent,
+    private readonly frontendArchitectureAgent: FrontendArchitectureAgent,
+    private readonly webSearchAgent: WebSearchAgent,
     private readonly rulesEngine: RulesEngine,
   ) {}
 
@@ -149,6 +163,8 @@ export class AppModule implements OnModuleInit {
     this.agentRegistry.register(this.pmAgent);
     this.agentRegistry.register(this.issueWorkflowAgent);
     this.agentRegistry.register(this.gitHubAgent);
+    this.agentRegistry.register(this.frontendArchitectureAgent);
+    this.agentRegistry.register(this.webSearchAgent);
 
     // Register agents in the router
     this.routerAgent.registerAllAgents();
