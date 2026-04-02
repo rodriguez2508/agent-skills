@@ -295,7 +295,7 @@ export class RouterAgent extends BaseAgent {
       return 'rules';
     }
 
-    // Patrones de arquitectura
+    // Patrones de arquitectura frontend (PRIORIDAD ALTA - antes que analysis)
     if (
       this.matchesPattern(lowerInput, [
         'arquitectura',
@@ -303,19 +303,30 @@ export class RouterAgent extends BaseAgent {
         'estructura',
         'patrón',
         'clean',
+        'valida arquitectura',
+        'validar arquitectura',
+        'valida frontend',
+        'validar frontend',
+        'frontend architecture',
+        'arquitectura frontend',
+        'angular architecture',
+        'arquitectura angular',
+        'analiza el proyecto',
+        'analizar el proyecto',
+        'analiza proyecto',
+        'analizar proyecto',
       ])
     ) {
-      return 'architecture';
+      return 'frontend-architecture';
     }
 
-    // Patrones de análisis
+    // Patrones de análisis (genérico)
     if (
       this.matchesPattern(lowerInput, [
-        'analiza',
-        'analizar',
-        'análisis',
         'revisa',
         'verifica',
+        'revisar',
+        'verificar',
       ])
     ) {
       return 'analysis';
@@ -360,6 +371,7 @@ export class RouterAgent extends BaseAgent {
       code: 'CodeAgent',
       rules: 'RulesAgent',
       architecture: 'ArchitectureAgent',
+      'frontend-architecture': 'FrontendArchitectureAgent',
       analysis: 'AnalysisAgent',
       identity: 'IdentityAgent',
       metrics: 'MetricsAgent',

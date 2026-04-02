@@ -7,6 +7,7 @@ import { SessionStatus } from '../entities/session.entity';
 export interface CreateSessionDto {
   sessionId: string;
   userId?: string;
+  projectId?: string; // ← NEW: Link to project
   title?: string;
   purpose?: string | null; // Specific goal/issue for this session
   purposeId?: string; // Foreign key to session_purposes

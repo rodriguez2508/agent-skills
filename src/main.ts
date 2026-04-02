@@ -31,7 +31,9 @@ async function bootstrap() {
   // Swagger
   const config = new DocumentBuilder()
     .setTitle('Agent Skills API')
-    .setDescription('API para búsqueda de reglas usando BM25 con arquitectura Hexagonal + CQRS')
+    .setDescription(
+      'API para búsqueda de reglas usando BM25 con arquitectura Hexagonal + CQRS',
+    )
     .setVersion('1.0.0')
     .addTag('health', 'Health check endpoints')
     .addTag('rules', 'Rule management and search')
@@ -42,10 +44,12 @@ async function bootstrap() {
   const document = SwaggerModule.createDocument(app, config);
   SwaggerModule.setup('api', app, document);
 
-  const port = process.env.PORT || 3000;
+  const port = process.env.PORT || 8004;
   await app.listen(port);
   console.log(`Application is running on: http://localhost:${port}`);
   console.log(`Swagger documentation: http://localhost:${port}/api`);
-  console.log(`Auto-detect endpoint: POST http://localhost:${port}/projects/auto-detect`);
+  console.log(
+    `Auto-detect endpoint: POST http://localhost:${port}/projects/auto-detect`,
+  );
 }
 bootstrap();

@@ -14,6 +14,8 @@ import { IssueStatus } from '@modules/issues/domain/entities/issue.entity';
 import { ProjectsService } from '@modules/projects/application/services/projects.service';
 import { ContextService } from '@modules/contexts/application/services/context.service';
 import { ContextType } from '@modules/contexts/domain/entities/context.entity';
+import * as fs from 'fs/promises';
+import * as path from 'path';
 
 export interface McpSession {
   server: McpServer;
@@ -38,6 +40,26 @@ export class McpService {
     private readonly contextService: ContextService,
   ) {
     this.apiPort = this.configService.get<number>('PORT', 8004);
+  }
+
+  /**
+   * Lee package.json desde el directorio actual
+   * Usado para detectar el nombre del proyecto automáticamente
+   */
+  private async readPackageJson(dir: string): Promise<{
+    name: string;
+    version?: string;
+    dependencies?: Record<string, string>;
+    devDependencies?: Record<string, string>;
+  } | null> {
+    try {
+      const packageJsonPath = path.join(dir, 'package.json');
+      const content = await fs.readFile(packageJsonPath, 'utf-8');
+      return JSON.parse(content);
+    } catch (error) {
+      this.logger.debug(`No package.json found in ${dir}: ${error.message}`);
+      return null;
+    }
   }
 
   /**
@@ -214,6 +236,44 @@ Issue tracking is enabled for this session.`,
       `👤 User ${isNew ? 'created' : 'found'} for IP ${ipAddress}: ${userId}`,
     );
 
+    // STEP 1.5: Detect project from process.cwd() and create/link project
+    // This is CRITICAL - project must be created BEFORE session and issue
+    let projectId: string | null = null;
+    let projectName: string | null = null;
+    
+    try {
+      // Read package.json directly from process.cwd()
+      const packageJson = await this.readPackageJson(process.cwd());
+      projectName = packageJson?.name || null;
+      
+      if (projectName) {
+        // Create or get project with REAL name from package.json
+        const project = await this.projectsService.findOrCreateProject({
+          name: projectName,
+          userId,
+          metadata: {
+            detectedFrom: 'mcp-session-init',
+            projectPath: process.cwd(),
+            detectedAt: new Date().toISOString(),
+          },
+        });
+        
+        projectId = project.id;
+        this.logger.log(
+          `📁 Project detected and linked: ${projectName} (${project.id})`,
+        );
+      } else {
+        this.logger.warn(
+          `⚠️ No package.json found in ${process.cwd()}, session will not have project linked`,
+        );
+      }
+    } catch (error) {
+      this.logger.error(
+        `Error detecting/creating project: ${error.message}`,
+      );
+      // Continue without project - don't fail session creation
+    }
+
     // STEP 2: TRY TO REUSE EXISTING ACTIVE SESSION FOR THIS IP
     let existingSessionId: string | null = null;
     try {
@@ -262,40 +322,56 @@ Issue tracking is enabled for this session.`,
     }
 
     // STEP 3: Create session in PostgreSQL (new or update existing)
+    // IMPORTANT: Include projectId if available
     try {
       if (existingSessionId) {
         // Update existing session with new transport info
         const existingSession =
           await this.sessionRepository.findBySessionId(existingSessionId);
+        
+        // Update projectId if not already set and we have one
+        const updateData: any = {
+          status: SessionStatus.ACTIVE,
+          lastActivityAt: new Date(),
+          metadata: {
+            ...(existingSession?.metadata || {}),
+            clientId,
+            clientIp: ipAddress,
+            lastConnectedAt: new Date().toISOString(),
+          } as any,
+        };
+        
+        // Link project to existing session if not already linked
+        if (projectId && !existingSession?.projectId) {
+          updateData.projectId = projectId;
+          this.logger.log(
+            `🔗 Project ${projectName} linked to existing session ${existingSessionId}`,
+          );
+        }
+        
         await this.sessionRepository.getRepository().update(
           { sessionId: existingSessionId },
-          {
-            status: SessionStatus.ACTIVE,
-            lastActivityAt: new Date(),
-            metadata: {
-              ...(existingSession?.metadata || {}),
-              clientId,
-              clientIp: ipAddress,
-              lastConnectedAt: new Date().toISOString(),
-            } as any,
-          },
+          updateData,
         );
         this.logger.log(`✅ REACTIVATED session: ${existingSessionId}`);
       } else {
-        // Create new session
+        // Create new session WITH projectId
         await this.sessionRepository.create({
           sessionId: transportSessionId,
           userId,
-          title: `MCP Session - ${ipAddress}`,
+          projectId: projectId || undefined, // ← Convert null to undefined
+          title: `MCP Session - ${ipAddress}${projectName ? ` - ${projectName}` : ''}`,
           metadata: {
             type: 'mcp',
             clientId,
             clientIp: ipAddress,
             createdAt: new Date().toISOString(),
+            projectName,
+            projectPath: process.cwd(),
           },
         });
         this.logger.log(
-          `💾 NEW session created in PostgreSQL: ${transportSessionId}`,
+          `💾 NEW session created in PostgreSQL: ${transportSessionId}${projectId ? ` | Project: ${projectName}` : ''}`,
         );
       }
     } catch (error) {
@@ -305,6 +381,7 @@ Issue tracking is enabled for this session.`,
     }
 
     // STEP 4: Store user info in Redis for fast lookups
+    // Also store projectId for fast lookups
     try {
       const finalSessionId = existingSessionId || transportSessionId;
       await this.redisService.set(
@@ -322,6 +399,20 @@ Issue tracking is enabled for this session.`,
         ipAddress,
         3600,
       );
+      
+      // Store projectId in Redis for fast lookups
+      if (projectId) {
+        await this.redisService.set(
+          `session:${finalSessionId}:projectId`,
+          projectId,
+          3600,
+        );
+        await this.redisService.set(
+          `session:${finalSessionId}:projectName`,
+          projectName,
+          3600,
+        );
+      }
 
       // Cache IP -> sessionId mapping
       await this.redisService.set(
@@ -355,25 +446,31 @@ Issue tracking is enabled for this session.`,
     );
 
     // STEP 5: Create issue automatically for this session (for tracking work)
+    // IMPORTANT: Include projectId so issue is linked to project
     try {
       // Check if session already has an issue
       const session =
         await this.sessionRepository.findBySessionId(finalSessionId);
 
       if (session && !session.issueId) {
-        const title = `MCP Session - ${ipAddress} - ${new Date().toISOString().substring(0, 10)}`;
+        // Use project name in title if available
+        const title = projectName
+          ? `Session ${projectName} - ${new Date().toISOString().substring(0, 10)}`
+          : `MCP Session - ${ipAddress} - ${new Date().toISOString().substring(0, 10)}`;
 
         const issue = await this.issueService.createIssue({
           title,
-          description: `Auto-created issue for MCP session. Session started from IP: ${ipAddress}`,
+          description: `Auto-created issue for MCP session. Session started from IP: ${ipAddress}${projectName ? ` | Project: ${projectName}` : ''}`,
           userId,
           sessionId: finalSessionId,
+          projectId: projectId || undefined, // ← LINK ISSUE TO PROJECT
           metadata: {
             autoCreated: true,
             source: 'mcp-session-init',
             clientIp: ipAddress,
             clientId,
             createdAt: new Date().toISOString(),
+            projectName: projectName || undefined,
           },
         });
 
@@ -390,7 +487,7 @@ Issue tracking is enabled for this session.`,
         );
 
         this.logger.log(
-          `✅ Issue auto-created for session: ${issue.id} (${issue.issueId}) - title: "${title}"`,
+          `✅ Issue auto-created for session: ${issue.id} (${issue.issueId}) - title: "${title}"${projectId ? ` | Project: ${projectName}` : ''}`,
         );
       } else if (session?.issueId) {
         // Restore issue mapping to Redis
@@ -597,34 +694,36 @@ Issue tracking is enabled for this session.`,
       }
 
       // STEP 3: Find or create project
+      // Always create a project, even if name is not detected (use default name)
       let projectId: string | null = null;
 
-      if (projectName) {
-        const project = await this.projectsService.findOrCreateProject({
-          name: projectName,
-          userId,
-          metadata: {
-            detectedFrom: 'mcp-message',
-            initialMessage: userMessage.substring(0, 200),
-          },
-        });
-        projectId = project.id;
+      const projectToCreate = {
+        name: projectName || `session-${sessionId.substring(0, 8)}`,
+        userId,
+        metadata: {
+          detectedFrom: projectName ? 'mcp-message' : 'mcp-default',
+          initialMessage: userMessage.substring(0, 200),
+          sessionId,
+        },
+      };
 
-        // Link project to session
-        if (session) {
-          await this.sessionRepository
-            .getRepository()
-            .update({ sessionId }, { projectId });
-          this.logger.log(`🔗 Project linked to session: ${projectName}`);
-        }
+      const project = await this.projectsService.findOrCreateProject(projectToCreate);
+      projectId = project.id;
 
-        // Cache project in Redis
-        await this.redisService.set(
-          `session:${sessionId}:projectId`,
-          projectId,
-          3600,
-        );
+      // Link project to session
+      if (session) {
+        await this.sessionRepository
+          .getRepository()
+          .update({ sessionId }, { projectId });
+        this.logger.log(`🔗 Project linked to session: ${project.name}`);
       }
+
+      // Cache project in Redis
+      await this.redisService.set(
+        `session:${sessionId}:projectId`,
+        projectId,
+        3600,
+      );
 
       // STEP 4: Detect intention (work vs analysis)
       const intention = this.detectIntention(userMessage);

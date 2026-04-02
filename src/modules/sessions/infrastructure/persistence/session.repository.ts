@@ -40,6 +40,7 @@ export class SessionRepository implements ISessionRepository {
     const session = this.repository.create({
       sessionId: data.sessionId,
       userId: data.userId || undefined,
+      projectId: data.projectId || undefined, // ← NEW: Link to project
       issueId: (data as any).issueId || undefined, // Will be added to CreateSessionDto later
       title: data.title,
       isValidated: false,

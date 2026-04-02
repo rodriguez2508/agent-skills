@@ -338,10 +338,12 @@ export class McpController {
       input: string;
       options?: Record<string, any>;
       sessionId?: string;
+      projectPath?: string;
+      projectContext?: any;
     },
     @Req() req: Request,
   ) {
-    const { input, options, sessionId: providedSessionId } = body;
+    const { input, options, sessionId: providedSessionId, projectPath, projectContext } = body;
 
     if (!input || input.trim().length === 0) {
       return {
@@ -494,6 +496,8 @@ export class McpController {
           ...optionsWithIssue,
           sessionId,
           userId: await this.redisService.get(`session:${sessionId}:userId`),
+          projectPath: projectPath || projectIdForSession,
+          projectContext,
         },
       });
 
