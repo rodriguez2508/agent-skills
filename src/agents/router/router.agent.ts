@@ -98,6 +98,7 @@ export class RouterAgent extends BaseAgent {
             '- Product Management (creating issues, user stories)\n' +
             '- Issue workflow tracking',
           intention,
+          targetAgent: this.agentId,
           availableAgents: this.agentRegistry.getAgentIds(),
           relevantRules: relevantRules.length > 0 ? relevantRules : undefined,
         },

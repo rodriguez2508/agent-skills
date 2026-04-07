@@ -1,6 +1,6 @@
 /**
  * Migration: CreateTables (Initial Schema)
- * 
+ *
  * Creates the initial database schema with:
  * - users table
  * - sessions table
@@ -8,7 +8,13 @@
  * - Required enums and indexes
  */
 
-import { MigrationInterface, QueryRunner, Table, TableIndex, TableForeignKey } from 'typeorm';
+import {
+  MigrationInterface,
+  QueryRunner,
+  Table,
+  TableIndex,
+  TableForeignKey,
+} from 'typeorm';
 
 export class CreateTables1711152000000 implements MigrationInterface {
   public async up(queryRunner: QueryRunner): Promise<void> {
@@ -309,7 +315,10 @@ export class CreateTables1711152000000 implements MigrationInterface {
     await queryRunner.query(`DROP TABLE IF EXISTS migrations`);
 
     // Drop foreign keys
-    await queryRunner.dropForeignKey('chat_messages', 'FK_CHAT_MESSAGES_SESSION');
+    await queryRunner.dropForeignKey(
+      'chat_messages',
+      'FK_CHAT_MESSAGES_SESSION',
+    );
     await queryRunner.dropForeignKey('sessions', 'FK_SESSIONS_USER');
 
     // Drop tables

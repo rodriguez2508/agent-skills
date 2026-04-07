@@ -42,10 +42,7 @@ export abstract class ISessionRepository {
     tokenCount?: number;
   }): Promise<any>;
 
-  abstract updateStatus(
-    sessionId: string,
-    status: SessionStatus,
-  ): Promise<any>;
+  abstract updateStatus(sessionId: string, status: SessionStatus): Promise<any>;
 
   abstract close(sessionId: string): Promise<any>;
 

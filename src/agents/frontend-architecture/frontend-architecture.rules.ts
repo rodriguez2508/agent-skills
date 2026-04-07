@@ -1,8 +1,8 @@
 /**
  * Frontend Architecture Rules
- * 
+ *
  * Reglas para validar arquitectura frontend Angular con Clean Architecture + CQRS
- * 
+ *
  * @see ARCHITECTURE.md - Documentación de arquitectura frontend
  */
 
@@ -72,18 +72,29 @@ export const CONTEXT_STRUCTURE_RULES: ArchitectureRule[] = [
     description: 'context/ debe tener application/ con commands/ y queries/',
     category: 'structure',
     severity: 'ERROR',
-    patterns: ['application/commands', 'application/queries', 'application/facade.ts'],
-    errorMessage: 'context/ missing application layer (commands/, queries/, facade.ts)',
+    patterns: [
+      'application/commands',
+      'application/queries',
+      'application/facade.ts',
+    ],
+    errorMessage:
+      'context/ missing application layer (commands/, queries/, facade.ts)',
     successMessage: 'Application layer correctly structured with CQRS',
   },
   {
     id: 'ctx-003',
     name: 'Infrastructure Layer',
-    description: 'context/ debe tener infrastructure/ con api/, state/, repositories/',
+    description:
+      'context/ debe tener infrastructure/ con api/, state/, repositories/',
     category: 'structure',
     severity: 'ERROR',
-    patterns: ['infrastructure/api', 'infrastructure/state', 'infrastructure/repositories'],
-    errorMessage: 'context/ missing infrastructure layer (api/, state/, repositories/)',
+    patterns: [
+      'infrastructure/api',
+      'infrastructure/state',
+      'infrastructure/repositories',
+    ],
+    errorMessage:
+      'context/ missing infrastructure layer (api/, state/, repositories/)',
     successMessage: 'Infrastructure layer correctly structured',
   },
 ];
@@ -95,7 +106,8 @@ export const NAMING_CONVENTION_RULES: ArchitectureRule[] = [
   {
     id: 'name-001',
     name: 'Command Naming',
-    description: 'Commands deben seguir patrón: [Verb][Noun] (ej: CreateTravel)',
+    description:
+      'Commands deben seguir patrón: [Verb][Noun] (ej: CreateTravel)',
     category: 'naming',
     severity: 'WARNING',
     patterns: ['application/commands/**/*.command.ts'],
@@ -103,7 +115,8 @@ export const NAMING_CONVENTION_RULES: ArchitectureRule[] = [
       {
         type: 'pattern',
         regex: /^[A-Z][a-zA-Z]*Command$/,
-        message: 'Command name should be [Verb][Noun]Command (e.g., CreateTravelCommand)',
+        message:
+          'Command name should be [Verb][Noun]Command (e.g., CreateTravelCommand)',
       },
     ],
     errorMessage: 'Command naming convention violation',
@@ -112,7 +125,8 @@ export const NAMING_CONVENTION_RULES: ArchitectureRule[] = [
   {
     id: 'name-002',
     name: 'Query Naming',
-    description: 'Queries deben seguir patrón: Get[Noun] (ej: GetActiveTravels)',
+    description:
+      'Queries deben seguir patrón: Get[Noun] (ej: GetActiveTravels)',
     category: 'naming',
     severity: 'WARNING',
     patterns: ['application/queries/**/*.query.ts'],
@@ -120,7 +134,8 @@ export const NAMING_CONVENTION_RULES: ArchitectureRule[] = [
       {
         type: 'pattern',
         regex: /^Get[A-Z][a-zA-Z]*Query$/,
-        message: 'Query name should be Get[Noun]Query (e.g., GetActiveTravelsQuery)',
+        message:
+          'Query name should be Get[Noun]Query (e.g., GetActiveTravelsQuery)',
       },
     ],
     errorMessage: 'Query naming convention violation',
@@ -137,7 +152,8 @@ export const NAMING_CONVENTION_RULES: ArchitectureRule[] = [
       {
         type: 'pattern',
         regex: /^[A-Z][a-zA-Z]*sStore$/,
-        message: 'Store name should be plural (e.g., TravelsStore, not TravelStore)',
+        message:
+          'Store name should be plural (e.g., TravelsStore, not TravelStore)',
       },
     ],
     errorMessage: 'Store naming convention violation',
@@ -177,7 +193,8 @@ export const ARCHITECTURE_PATTERN_RULES: ArchitectureRule[] = [
       {
         type: 'count',
         max: 5,
-        message: 'Store has too many signals (>5). Consider splitting into smaller stores.',
+        message:
+          'Store has too many signals (>5). Consider splitting into smaller stores.',
       },
     ],
     errorMessage: 'God Store detected - consider splitting into smaller stores',
@@ -186,7 +203,8 @@ export const ARCHITECTURE_PATTERN_RULES: ArchitectureRule[] = [
   {
     id: 'pattern-002',
     name: 'Facade as Single Entry Point',
-    description: 'Componentes de vistas solo inyectan Facade, NO Stores directamente',
+    description:
+      'Componentes de vistas solo inyectan Facade, NO Stores directamente',
     category: 'pattern',
     severity: 'ERROR',
     patterns: ['views/**/*.component.ts'],
@@ -208,7 +226,8 @@ export const ARCHITECTURE_PATTERN_RULES: ArchitectureRule[] = [
   {
     id: 'pattern-003',
     name: 'Sockets Outside Store',
-    description: 'Lógica de sockets debe estar fuera del Store (en infrastructure/socket/)',
+    description:
+      'Lógica de sockets debe estar fuera del Store (en infrastructure/socket/)',
     category: 'pattern',
     severity: 'ERROR',
     patterns: ['infrastructure/state/*.store.ts'],
@@ -255,7 +274,8 @@ export const ARCHITECTURE_PATTERN_RULES: ArchitectureRule[] = [
       {
         type: 'forbidden',
         regex: /(HttpClient|\.get\(|\.post\(|\.put\(|\.delete\()/,
-        message: 'Direct HTTP call in component. Use Facade → Command → API service instead.',
+        message:
+          'Direct HTTP call in component. Use Facade → Command → API service instead.',
       },
     ],
     errorMessage: 'Component should not make direct HTTP calls',
@@ -280,7 +300,8 @@ export const SHARED_ORGANIZATION_RULES: ArchitectureRule[] = [
   {
     id: 'shared-002',
     name: 'Feature-Specific Shared',
-    description: 'Componentes específicos de feature deben estar en feature/shared/',
+    description:
+      'Componentes específicos de feature deben estar en feature/shared/',
     category: 'convention',
     severity: 'INFO',
     patterns: ['features/*/shared/components'],
@@ -303,9 +324,13 @@ export const ALL_ARCHITECTURE_RULES: ArchitectureRule[] = [
 /**
  * Reglas críticas (ERROR severity)
  */
-export const CRITICAL_RULES = ALL_ARCHITECTURE_RULES.filter(r => r.severity === 'ERROR');
+export const CRITICAL_RULES = ALL_ARCHITECTURE_RULES.filter(
+  (r) => r.severity === 'ERROR',
+);
 
 /**
  * Reglas recomendadas (WARNING severity)
  */
-export const RECOMMENDED_RULES = ALL_ARCHITECTURE_RULES.filter(r => r.severity === 'WARNING');
+export const RECOMMENDED_RULES = ALL_ARCHITECTURE_RULES.filter(
+  (r) => r.severity === 'WARNING',
+);

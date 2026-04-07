@@ -236,42 +236,30 @@ Issue tracking is enabled for this session.`,
       `👤 User ${isNew ? 'created' : 'found'} for IP ${ipAddress}: ${userId}`,
     );
 
-    // STEP 1.5: Detect project from process.cwd() and create/link project
-    // This is CRITICAL - project must be created BEFORE session and issue
-    let projectId: string | null = null;
+    // STEP 1.5: Detect project from process.cwd() - BUT DON'T CREATE YET
+    // Projects are created on-demand when agent detects actual interaction
+    // This avoids the error when no user has interacted yet
+    const projectId: string | null = null;
     let projectName: string | null = null;
-    
+
     try {
-      // Read package.json directly from process.cwd()
+      // Read package.json to show in logs, but don't create project yet
       const packageJson = await this.readPackageJson(process.cwd());
       projectName = packageJson?.name || null;
-      
+
       if (projectName) {
-        // Create or get project with REAL name from package.json
-        const project = await this.projectsService.findOrCreateProject({
-          name: projectName,
-          userId,
-          metadata: {
-            detectedFrom: 'mcp-session-init',
-            projectPath: process.cwd(),
-            detectedAt: new Date().toISOString(),
-          },
-        });
-        
-        projectId = project.id;
         this.logger.log(
-          `📁 Project detected and linked: ${projectName} (${project.id})`,
+          `📁 Project detected in cwd: ${projectName} (will be created on first user interaction)`,
         );
       } else {
-        this.logger.warn(
-          `⚠️ No package.json found in ${process.cwd()}, session will not have project linked`,
+        this.logger.log(
+          `ℹ️ No package.json found in ${process.cwd()}, project will be created on-demand if needed`,
         );
       }
     } catch (error) {
-      this.logger.error(
-        `Error detecting/creating project: ${error.message}`,
+      this.logger.debug(
+        `No project detected at session init: ${error.message}`,
       );
-      // Continue without project - don't fail session creation
     }
 
     // STEP 2: TRY TO REUSE EXISTING ACTIVE SESSION FOR THIS IP
@@ -328,7 +316,7 @@ Issue tracking is enabled for this session.`,
         // Update existing session with new transport info
         const existingSession =
           await this.sessionRepository.findBySessionId(existingSessionId);
-        
+
         // Update projectId if not already set and we have one
         const updateData: any = {
           status: SessionStatus.ACTIVE,
@@ -340,7 +328,7 @@ Issue tracking is enabled for this session.`,
             lastConnectedAt: new Date().toISOString(),
           } as any,
         };
-        
+
         // Link project to existing session if not already linked
         if (projectId && !existingSession?.projectId) {
           updateData.projectId = projectId;
@@ -348,11 +336,10 @@ Issue tracking is enabled for this session.`,
             `🔗 Project ${projectName} linked to existing session ${existingSessionId}`,
           );
         }
-        
-        await this.sessionRepository.getRepository().update(
-          { sessionId: existingSessionId },
-          updateData,
-        );
+
+        await this.sessionRepository
+          .getRepository()
+          .update({ sessionId: existingSessionId }, updateData);
         this.logger.log(`✅ REACTIVATED session: ${existingSessionId}`);
       } else {
         // Create new session WITH projectId
@@ -399,7 +386,7 @@ Issue tracking is enabled for this session.`,
         ipAddress,
         3600,
       );
-      
+
       // Store projectId in Redis for fast lookups
       if (projectId) {
         await this.redisService.set(
@@ -707,7 +694,8 @@ Issue tracking is enabled for this session.`,
         },
       };
 
-      const project = await this.projectsService.findOrCreateProject(projectToCreate);
+      const project =
+        await this.projectsService.findOrCreateProject(projectToCreate);
       projectId = project.id;
 
       // Link project to session

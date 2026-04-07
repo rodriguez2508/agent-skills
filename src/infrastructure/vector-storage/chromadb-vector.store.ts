@@ -1,20 +1,20 @@
 /**
  * ChromaDB Vector Store Implementation
- * 
+ *
  * Production-ready vector store using ChromaDB.
  * @see https://docs.trychroma.com/
- * 
+ *
  * Features:
  * - Persistent storage
  * - HNSW index for fast similarity search
  * - Metadata filtering
  * - Multiple collections
- * 
+ *
  * Installation:
  * ```bash
  * pnpm add chromadb
  * ```
- * 
+ *
  * Usage:
  * ```typescript
  * const store = new ChromaDBVectorStore({
@@ -76,27 +76,33 @@ export class ChromaDBVectorStore implements IVectorStore {
 
   async connect(): Promise<void> {
     if (!ChromaClient) {
-      throw new Error(
-        'ChromaDB is not installed. Run: pnpm add chromadb'
-      );
+      throw new Error('ChromaDB is not installed. Run: pnpm add chromadb');
     }
 
-    this.logger.log(`📦 [ChromaDBVectorStore] Connecting to ${this.config.path}...`);
+    this.logger.log(
+      `📦 [ChromaDBVectorStore] Connecting to ${this.config.path}...`,
+    );
 
     try {
       this.client = new ChromaClient({
         path: this.config.path,
-        auth: this.config.apiKey ? { provider: 'token', token: this.config.apiKey } : undefined,
+        auth: this.config.apiKey
+          ? { provider: 'token', token: this.config.apiKey }
+          : undefined,
       });
 
       // Test connection
       await this.client.heartbeat();
-      
+
       this.connected = true;
       this.logger.log('✅ [ChromaDBVectorStore] Connected successfully');
     } catch (error) {
-      this.logger.error(`❌ [ChromaDBVectorStore] Connection failed: ${error instanceof Error ? error.message : error}`);
-      throw new Error(`Failed to connect to ChromaDB: ${error instanceof Error ? error.message : error}`);
+      this.logger.error(
+        `❌ [ChromaDBVectorStore] Connection failed: ${error instanceof Error ? error.message : error}`,
+      );
+      throw new Error(
+        `Failed to connect to ChromaDB: ${error instanceof Error ? error.message : error}`,
+      );
     }
   }
 
@@ -112,15 +118,20 @@ export class ChromaDBVectorStore implements IVectorStore {
     return this.connected;
   }
 
-  async createCollection(collectionName: string, dimension?: number): Promise<void> {
+  async createCollection(
+    collectionName: string,
+    dimension?: number,
+  ): Promise<void> {
     if (!this.connected) {
       throw new Error('VectorStore not connected. Call connect() first.');
     }
 
     try {
       // Check if collection exists
-      const existing = await this.client.getCollection({ name: collectionName });
-      
+      const existing = await this.client.getCollection({
+        name: collectionName,
+      });
+
       if (existing) {
         this.logger.warn(`⚠️ Collection '${collectionName}' already exists`);
         this.collections.set(collectionName, existing);
@@ -140,8 +151,10 @@ export class ChromaDBVectorStore implements IVectorStore {
     });
 
     this.collections.set(collectionName, collection);
-    
-    this.logger.log(`📁 [ChromaDBVectorStore] Created collection: ${collectionName}`);
+
+    this.logger.log(
+      `📁 [ChromaDBVectorStore] Created collection: ${collectionName}`,
+    );
   }
 
   async deleteCollection(collectionName: string): Promise<void> {
@@ -151,8 +164,10 @@ export class ChromaDBVectorStore implements IVectorStore {
 
     await this.client.deleteCollection({ name: collectionName });
     this.collections.delete(collectionName);
-    
-    this.logger.log(`🗑️ [ChromaDBVectorStore] Deleted collection: ${collectionName}`);
+
+    this.logger.log(
+      `🗑️ [ChromaDBVectorStore] Deleted collection: ${collectionName}`,
+    );
   }
 
   async listCollections(): Promise<string[]> {
@@ -164,12 +179,20 @@ export class ChromaDBVectorStore implements IVectorStore {
     return collections.map((c: any) => c.name);
   }
 
-  async upsert(document: VectorDocument, options?: UpsertOptions): Promise<void> {
+  async upsert(
+    document: VectorDocument,
+    options?: UpsertOptions,
+  ): Promise<void> {
     if (!this.connected) {
       throw new Error('VectorStore not connected. Call connect() first.');
     }
 
-    const collectionName = options?.collectionName || this.config.collectionName || 'default' || 'default' || 'default';
+    const collectionName =
+      options?.collectionName ||
+      this.config.collectionName ||
+      'default' ||
+      'default' ||
+      'default';
     let collection = this.collections.get(collectionName);
 
     if (!collection) {
@@ -181,25 +204,39 @@ export class ChromaDBVectorStore implements IVectorStore {
       await collection.upsert({
         ids: [document.id],
         embeddings: [document.vector],
-        metadatas: [{
-          ...document.metadata,
-          tags: document.metadata.tags?.join(',') || '',
-        }],
+        metadatas: [
+          {
+            ...document.metadata,
+            tags: document.metadata.tags?.join(',') || '',
+          },
+        ],
       });
 
-      this.logger.debug(`📝 [ChromaDBVectorStore] Upserted document ${document.id}`);
+      this.logger.debug(
+        `📝 [ChromaDBVectorStore] Upserted document ${document.id}`,
+      );
     } catch (error) {
-      this.logger.error(`Failed to upsert document: ${error instanceof Error ? error.message : error}`);
+      this.logger.error(
+        `Failed to upsert document: ${error instanceof Error ? error.message : error}`,
+      );
       throw error;
     }
   }
 
-  async upsertBatch(documents: VectorDocument[], options?: UpsertOptions): Promise<void> {
+  async upsertBatch(
+    documents: VectorDocument[],
+    options?: UpsertOptions,
+  ): Promise<void> {
     if (!this.connected) {
       throw new Error('VectorStore not connected. Call connect() first.');
     }
 
-    const collectionName = options?.collectionName || this.config.collectionName || 'default' || 'default' || 'default';
+    const collectionName =
+      options?.collectionName ||
+      this.config.collectionName ||
+      'default' ||
+      'default' ||
+      'default';
     let collection = this.collections.get(collectionName);
 
     if (!collection) {
@@ -207,7 +244,9 @@ export class ChromaDBVectorStore implements IVectorStore {
       collection = this.collections.get(collectionName);
     }
 
-    this.logger.debug(`📦 [ChromaDBVectorStore] Upserting batch of ${documents.length} documents`);
+    this.logger.debug(
+      `📦 [ChromaDBVectorStore] Upserting batch of ${documents.length} documents`,
+    );
 
     try {
       await collection.upsert({
@@ -219,19 +258,30 @@ export class ChromaDBVectorStore implements IVectorStore {
         })),
       });
 
-      this.logger.log(`✅ [ChromaDBVectorStore] Batch upsert completed: ${documents.length} documents`);
+      this.logger.log(
+        `✅ [ChromaDBVectorStore] Batch upsert completed: ${documents.length} documents`,
+      );
     } catch (error) {
-      this.logger.error(`Failed to upsert batch: ${error instanceof Error ? error.message : error}`);
+      this.logger.error(
+        `Failed to upsert batch: ${error instanceof Error ? error.message : error}`,
+      );
       throw error;
     }
   }
 
-  async search(query: number[], options?: SearchOptions): Promise<VectorSearchResult[]> {
+  async search(
+    query: number[],
+    options?: SearchOptions,
+  ): Promise<VectorSearchResult[]> {
     if (!this.connected) {
       throw new Error('VectorStore not connected. Call connect() first.');
     }
 
-    const collectionName = options?.collectionName || this.config.collectionName || 'default' || 'default';
+    const collectionName =
+      options?.collectionName ||
+      this.config.collectionName ||
+      'default' ||
+      'default';
     const collection = this.collections.get(collectionName);
 
     if (!collection) {
@@ -242,12 +292,14 @@ export class ChromaDBVectorStore implements IVectorStore {
     const limit = options?.limit || 5;
     const filter = options?.filter;
 
-    this.logger.debug(`🔍 [ChromaDBVectorStore] Searching in ${collectionName} (limit: ${limit})`);
+    this.logger.debug(
+      `🔍 [ChromaDBVectorStore] Searching in ${collectionName} (limit: ${limit})`,
+    );
 
     try {
       // Build where filter
       const where: Record<string, any> = {};
-      
+
       if (filter) {
         if (filter.category) {
           where.category = filter.category;
@@ -255,7 +307,11 @@ export class ChromaDBVectorStore implements IVectorStore {
         if (filter.ruleId) {
           where.ruleId = filter.ruleId;
         }
-        if (filter.tags && Array.isArray(filter.tags) && filter.tags.length > 0) {
+        if (
+          filter.tags &&
+          Array.isArray(filter.tags) &&
+          filter.tags.length > 0
+        ) {
           where.tags = { $contains: filter.tags[0] }; // Simplified for first tag
         }
       }
@@ -273,7 +329,7 @@ export class ChromaDBVectorStore implements IVectorStore {
       if (results.ids && results.ids[0]) {
         for (let i = 0; i < results.ids[0].length; i++) {
           const metadata = results.metadatas?.[0]?.[i] || {};
-          
+
           searchResults.push({
             document: {
               id: results.ids[0][i],
@@ -293,17 +349,26 @@ export class ChromaDBVectorStore implements IVectorStore {
         }
       }
 
-      this.logger.debug(`✅ [ChromaDBVectorStore] Found ${searchResults.length} results`);
+      this.logger.debug(
+        `✅ [ChromaDBVectorStore] Found ${searchResults.length} results`,
+      );
 
       return searchResults;
     } catch (error) {
-      this.logger.error(`Search failed: ${error instanceof Error ? error.message : error}`);
+      this.logger.error(
+        `Search failed: ${error instanceof Error ? error.message : error}`,
+      );
       return [];
     }
   }
 
-  async getById(id: string, collectionName?: string): Promise<VectorDocument | null> {
-    const collection = this.collections.get(collectionName || this.config.collectionName || 'default');
+  async getById(
+    id: string,
+    collectionName?: string,
+  ): Promise<VectorDocument | null> {
+    const collection = this.collections.get(
+      collectionName || this.config.collectionName || 'default',
+    );
 
     if (!collection) {
       return null;
@@ -339,7 +404,9 @@ export class ChromaDBVectorStore implements IVectorStore {
   }
 
   async delete(id: string, collectionName?: string): Promise<boolean> {
-    const collection = this.collections.get(collectionName || this.config.collectionName || 'default');
+    const collection = this.collections.get(
+      collectionName || this.config.collectionName || 'default',
+    );
 
     if (!collection) {
       return false;
@@ -354,8 +421,13 @@ export class ChromaDBVectorStore implements IVectorStore {
     }
   }
 
-  async deleteByFilter(filter: VectorFilter, collectionName?: string): Promise<number> {
-    const collection = this.collections.get(collectionName || this.config.collectionName || 'default');
+  async deleteByFilter(
+    filter: VectorFilter,
+    collectionName?: string,
+  ): Promise<number> {
+    const collection = this.collections.get(
+      collectionName || this.config.collectionName || 'default',
+    );
 
     if (!collection) {
       return 0;
@@ -364,7 +436,7 @@ export class ChromaDBVectorStore implements IVectorStore {
     try {
       // Get IDs matching filter
       const where: Record<string, any> = {};
-      
+
       if (filter.category) {
         where.category = filter.category;
       }
@@ -382,9 +454,11 @@ export class ChromaDBVectorStore implements IVectorStore {
       }
 
       await collection.delete({ ids: results.ids });
-      
-      this.logger.log(`🗑️ [ChromaDBVectorStore] Deleted ${results.ids.length} documents by filter`);
-      
+
+      this.logger.log(
+        `🗑️ [ChromaDBVectorStore] Deleted ${results.ids.length} documents by filter`,
+      );
+
       return results.ids.length;
     } catch {
       return 0;
@@ -392,7 +466,9 @@ export class ChromaDBVectorStore implements IVectorStore {
   }
 
   async getStats(collectionName?: string): Promise<CollectionStats> {
-    const collection = this.collections.get(collectionName || this.config.collectionName || 'default');
+    const collection = this.collections.get(
+      collectionName || this.config.collectionName || 'default',
+    );
 
     if (!collection) {
       return { count: 0 };
@@ -400,7 +476,7 @@ export class ChromaDBVectorStore implements IVectorStore {
 
     try {
       const count = await collection.count();
-      
+
       return {
         count,
         dimension: this.config.dimension,
@@ -428,7 +504,7 @@ export class ChromaDBVectorStore implements IVectorStore {
 
       // Test connection
       await this.client.heartbeat();
-      
+
       const collectionCount = this.collections.size;
       const latency = Date.now() - startTime;
 
@@ -450,7 +526,9 @@ export class ChromaDBVectorStore implements IVectorStore {
   }
 
   async clear(collectionName?: string): Promise<void> {
-    const collection = this.collections.get(collectionName || this.config.collectionName || 'default');
+    const collection = this.collections.get(
+      collectionName || this.config.collectionName || 'default',
+    );
 
     if (!collection) {
       return;
@@ -458,13 +536,16 @@ export class ChromaDBVectorStore implements IVectorStore {
 
     try {
       // ChromaDB doesn't have a clear method, so we delete and recreate
-      const name: string = collectionName || this.config.collectionName || 'default';
+      const name: string =
+        collectionName || this.config.collectionName || 'default';
       await this.deleteCollection(name);
       await this.createCollection(name);
 
       this.logger.log(`🧹 [ChromaDBVectorStore] Cleared collection: ${name}`);
     } catch (error) {
-      this.logger.error(`Failed to clear collection: ${error instanceof Error ? error.message : error}`);
+      this.logger.error(
+        `Failed to clear collection: ${error instanceof Error ? error.message : error}`,
+      );
       throw error;
     }
   }

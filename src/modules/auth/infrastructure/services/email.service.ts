@@ -22,8 +22,10 @@ export class EmailService {
   private readonly appName: string;
 
   constructor(private readonly configService: ConfigService) {
-    this.fromEmail = this.configService.get<string>('EMAIL_FROM') || 'noreply@example.com';
-    this.appName = this.configService.get<string>('APP_NAME') || 'Agent Skills API';
+    this.fromEmail =
+      this.configService.get<string>('EMAIL_FROM') || 'noreply@example.com';
+    this.appName =
+      this.configService.get<string>('APP_NAME') || 'Agent Skills API';
   }
 
   /**
@@ -75,7 +77,7 @@ export class EmailService {
     this.logger.log(`📧 Email would be sent to: ${options.to}`);
     this.logger.log(`📝 Subject: ${options.subject}`);
     this.logger.log(`📄 HTML: ${options.html.substring(0, 200)}...`);
-    
+
     // In production, replace with actual email sending logic
     // Example with nodemailer:
     // const transporter = nodemailer.createTransport({ ... });
@@ -88,7 +90,10 @@ export class EmailService {
     // });
   }
 
-  private buildVerificationEmailHtml(verificationUrl: string, userName?: string): string {
+  private buildVerificationEmailHtml(
+    verificationUrl: string,
+    userName?: string,
+  ): string {
     return `
       <html>
         <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333;">
@@ -109,7 +114,10 @@ export class EmailService {
     `;
   }
 
-  private buildVerificationEmailText(verificationUrl: string, userName?: string): string {
+  private buildVerificationEmailText(
+    verificationUrl: string,
+    userName?: string,
+  ): string {
     return `
 Welcome${userName ? `, ${userName}` : ''}!
 
@@ -123,7 +131,10 @@ If you didn't create an account, please ignore this email.
     `.trim();
   }
 
-  private buildPasswordResetEmailHtml(resetUrl: string, userName?: string): string {
+  private buildPasswordResetEmailHtml(
+    resetUrl: string,
+    userName?: string,
+  ): string {
     return `
       <html>
         <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333;">
@@ -144,7 +155,10 @@ If you didn't create an account, please ignore this email.
     `;
   }
 
-  private buildPasswordResetEmailText(resetUrl: string, userName?: string): string {
+  private buildPasswordResetEmailText(
+    resetUrl: string,
+    userName?: string,
+  ): string {
     return `
 Password Reset Request${userName ? `, ${userName}` : ''}
 

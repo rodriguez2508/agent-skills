@@ -11,13 +11,8 @@ import { AgentLoggerService } from '@infrastructure/logging/agent-logger.service
 export class MetricsAgent extends BaseAgent {
   private readonly metrics: Map<string, any[]> = new Map();
 
-  constructor(
-    private readonly agentLogger: AgentLoggerService,
-  ) {
-    super(
-      'MetricsAgent',
-      'Registra métricas y genera estadísticas de uso',
-    );
+  constructor(private readonly agentLogger: AgentLoggerService) {
+    super('MetricsAgent', 'Registra métricas y genera estadísticas de uso');
   }
 
   /**
@@ -44,7 +39,11 @@ export class MetricsAgent extends BaseAgent {
   /**
    * Registra una métrica de uso de agente
    */
-  trackAgentUsage(agentId: string, executionTime: number, success: boolean): void {
+  trackAgentUsage(
+    agentId: string,
+    executionTime: number,
+    success: boolean,
+  ): void {
     const metric = {
       agentId,
       executionTime,
@@ -116,6 +115,8 @@ export class MetricsAgent extends BaseAgent {
       'cuántas',
     ];
 
-    return metricsKeywords.some((keyword) => input.toLowerCase().includes(keyword));
+    return metricsKeywords.some((keyword) =>
+      input.toLowerCase().includes(keyword),
+    );
   }
 }

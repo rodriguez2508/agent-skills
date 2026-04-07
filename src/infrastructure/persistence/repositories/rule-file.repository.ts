@@ -76,16 +76,17 @@ export class RuleFileRepository implements RuleRepository {
     const hasSubdirs = await this.hasCategorySubdirectories();
 
     if (hasSubdirs) {
+      // Nueva estructura jerárquica: buscar recursivamente en el directorio de categoría
       const categoryPath = path.join(this.rulesPath, category.toLowerCase());
       if (!fs.existsSync(categoryPath)) {
         return rules;
       }
 
-      const files = fs
-        .readdirSync(categoryPath)
-        .filter((file) => file.endsWith('.md'));
+      // Buscar recursivamente todos los archivos .md en el directorio y subdirectorios
+      const files = this.findAllMdFiles(categoryPath);
       for (const file of files) {
-        const rule = await this.loadRuleFromFileFile(category, file);
+        const filePath = path.join(categoryPath, file);
+        const rule = await this.loadRuleFromPath(filePath, category);
         if (rule) {
           rules.push(rule);
         }
@@ -104,6 +105,69 @@ export class RuleFileRepository implements RuleRepository {
     }
 
     return rules;
+  }
+
+  /**
+   * Encuentra recursivamente todos los archivos .md en un directorio
+   */
+  private findAllMdFiles(dirPath: string, relativePath: string = ''): string[] {
+    const files: string[] = [];
+    
+    if (!fs.existsSync(dirPath)) {
+      return files;
+    }
+
+    const items = fs.readdirSync(dirPath);
+    
+    for (const item of items) {
+      const itemPath = path.join(dirPath, item);
+      const stat = fs.statSync(itemPath);
+      
+      if (stat.isDirectory()) {
+        // Ignorar directorios que empiezan con _
+        if (item.startsWith('_')) continue;
+        
+        const subRelativePath = relativePath 
+          ? path.join(relativePath, item) 
+          : item;
+        const subFiles = this.findAllMdFiles(itemPath, subRelativePath);
+        files.push(...subFiles);
+      } else if (item.endsWith('.md') && !item.startsWith('_')) {
+        const relativeFilePath = relativePath 
+          ? path.join(relativePath, item) 
+          : item;
+        files.push(relativeFilePath);
+      }
+    }
+
+    return files;
+  }
+
+  /**
+   * Carga una regla desde una ruta completa
+   */
+  private async loadRuleFromPath(filePath: string, category: string): Promise<Rule | null> {
+    try {
+      const content = fs.readFileSync(filePath, 'utf-8');
+      const id = path.basename(filePath, '.md');
+      const name = this.extractTitle(content);
+      const body = content.replace(/^# .+\n+/, '').trim();
+      const tags = this.extractTags(content);
+      const impact = this.extractImpact(content);
+      const impactDescription = this.extractImpactDescription(content);
+
+      return new Rule({
+        id,
+        name,
+        content: body,
+        category,
+        tags,
+        impact,
+        impactDescription,
+      });
+    } catch {
+      return null;
+    }
   }
 
   async save(rule: Rule): Promise<void> {
@@ -165,7 +229,8 @@ export class RuleFileRepository implements RuleRepository {
       const name = this.extractTitle(content);
       const body = content.replace(/^# .+\n+/, '').trim();
       const tags = this.extractTags(content);
-      const category = this.extractCategoryFromFilename(id);
+      // Usar el directorio padre como categoría principal
+      const category = this.extractCategoryFromPath(filePath);
       const impact = this.extractImpact(content);
       const impactDescription = this.extractImpactDescription(content);
 
@@ -240,6 +305,40 @@ export class RuleFileRepository implements RuleRepository {
     };
 
     return categoryMap[prefix] || 'general';
+  }
+
+  /**
+   * Extrae la categoría desde la ruta del archivo (para estructura jerárquica)
+   * Ejemplos:
+   * - foundations/type-checking.md -> foundations
+   * - architecture/clean-architecture/clean-layers.md -> architecture
+   * - cqrs/core/cqrs-commands.md -> cqrs
+   */
+  private extractCategoryFromPath(filePath: string): string {
+    // Obtener el directorio relativo desde rulesPath
+    const relativePath = path.relative(this.rulesPath, filePath);
+    const parts = relativePath.split(path.sep);
+    
+    // El primer elemento es la categoría principal
+    const mainCategory = parts[0];
+    
+    // Mapeo de categorías principales a nombres amigables
+    const categoryMap: Record<string, string> = {
+      foundations: 'foundations',
+      architecture: 'architecture',
+      cqrs: 'cqrs',
+      api: 'api',
+      data: 'data',
+      performance: 'performance',
+      security: 'security',
+      testing: 'testing',
+      operations: 'operations',
+      microservices: 'microservices',
+      development: 'development',
+      organization: 'organization',
+    };
+    
+    return categoryMap[mainCategory] || mainCategory;
   }
 
   private hasCategorySubdirectories(): boolean {

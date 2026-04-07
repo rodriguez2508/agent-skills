@@ -14,7 +14,12 @@ describe('BM25Engine', () => {
     engine = new BM25Engine(mockConfigService as any);
   });
 
-  const createMockRule = (id: string, name: string, content: string, category: string): Rule => {
+  const createMockRule = (
+    id: string,
+    name: string,
+    content: string,
+    category: string,
+  ): Rule => {
     return new Rule({
       id,
       name,
@@ -28,7 +33,7 @@ describe('BM25Engine', () => {
   describe('index', () => {
     it('should index a rule successfully', () => {
       const rule = createMockRule('1', 'Test Rule', 'Test content', 'nestjs');
-      
+
       expect(() => engine.index(rule)).not.toThrow();
     });
 
@@ -45,9 +50,30 @@ describe('BM25Engine', () => {
 
   describe('search', () => {
     beforeEach(() => {
-      engine.index(createMockRule('1', 'Clean Architecture', 'Implement CQRS pattern in NestJS', 'nestjs'));
-      engine.index(createMockRule('2', 'Dependency Injection', 'Use providers and modules', 'nestjs'));
-      engine.index(createMockRule('3', 'Angular Components', 'Create standalone components with signals', 'angular'));
+      engine.index(
+        createMockRule(
+          '1',
+          'Clean Architecture',
+          'Implement CQRS pattern in NestJS',
+          'nestjs',
+        ),
+      );
+      engine.index(
+        createMockRule(
+          '2',
+          'Dependency Injection',
+          'Use providers and modules',
+          'nestjs',
+        ),
+      );
+      engine.index(
+        createMockRule(
+          '3',
+          'Angular Components',
+          'Create standalone components with signals',
+          'angular',
+        ),
+      );
     });
 
     it('should return results matching the query', () => {
@@ -80,9 +106,30 @@ describe('BM25Engine', () => {
 
   describe('searchByCategory', () => {
     beforeEach(() => {
-      engine.index(createMockRule('1', 'Clean Architecture', 'Implement CQRS pattern in NestJS', 'nestjs'));
-      engine.index(createMockRule('2', 'Dependency Injection', 'Use providers and modules', 'nestjs'));
-      engine.index(createMockRule('3', 'Angular Components', 'Create standalone components', 'angular'));
+      engine.index(
+        createMockRule(
+          '1',
+          'Clean Architecture',
+          'Implement CQRS pattern in NestJS',
+          'nestjs',
+        ),
+      );
+      engine.index(
+        createMockRule(
+          '2',
+          'Dependency Injection',
+          'Use providers and modules',
+          'nestjs',
+        ),
+      );
+      engine.index(
+        createMockRule(
+          '3',
+          'Angular Components',
+          'Create standalone components',
+          'angular',
+        ),
+      );
     });
 
     it('should filter results by category', () => {

@@ -18,6 +18,7 @@ import { HealthController } from '@presentation/controllers/health/health.contro
 import { RulesController } from '@presentation/controllers/rules/rules.controller';
 import { McpController } from '@presentation/controllers/mcp/mcp.controller';
 import { AgentsController } from '@presentation/controllers/agents/agents.controller';
+import { TaskBridgeController } from '@presentation/controllers/task-bridge/task-bridge.controller';
 
 // Application Handlers (CQRS)
 import { SearchRulesHandler } from '@application/queries/search-rules/search-rules.handler';
@@ -89,6 +90,7 @@ import { IpTrackerMiddleware } from '@shared/middleware/ip-tracker.middleware';
     McpController,
     AuthController,
     AgentsController,
+    TaskBridgeController,
   ],
   providers: [
     // Infrastructure

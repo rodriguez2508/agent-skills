@@ -31,7 +31,9 @@ export class ChatMessage {
   @Index()
   sessionId: string;
 
-  @ManyToOne(() => Session, (session) => session.messages, { onDelete: 'CASCADE' })
+  @ManyToOne(() => Session, (session) => session.messages, {
+    onDelete: 'CASCADE',
+  })
   @JoinColumn({ name: 'session_id', referencedColumnName: 'sessionId' })
   session?: Session;
 

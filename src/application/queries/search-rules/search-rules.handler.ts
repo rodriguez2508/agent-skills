@@ -2,7 +2,10 @@ import { Inject } from '@nestjs/common';
 import { QueryHandler } from '@nestjs/cqrs';
 import { SearchRulesQuery } from './search-rules.query';
 import { Rule } from '@core/domain/entities/rule.entity';
-import { RULE_REPOSITORY, RuleRepository } from '@core/domain/ports/rule-repository.token';
+import {
+  RULE_REPOSITORY,
+  RuleRepository,
+} from '@core/domain/ports/rule-repository.token';
 import { BM25Engine } from '@infrastructure/search/bm25/bm25.engine';
 
 export interface SearchResult {

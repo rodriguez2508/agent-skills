@@ -1,6 +1,6 @@
 /**
  * Vector Storage Module
- * 
+ *
  * NestJS module for vector storage with multi-backend support.
  * Provides dependency injection for vector stores and embeddings.
  */
@@ -21,12 +21,12 @@ export interface VectorStorageModuleOptions {
    * @default 'inmemory'
    */
   type?: VectorStoreType;
-  
+
   /**
    * Configuration for the vector store
    */
   config?: VectorStoreConfig;
-  
+
   /**
    * Whether to use global module
    * @default true
@@ -38,15 +38,17 @@ export interface VectorStorageModuleOptions {
  * Async options for configuring the vector storage module
  */
 export interface VectorStorageModuleAsyncOptions {
-  useFactory: (...args: any[]) => Promise<VectorStorageModuleOptions> | VectorStorageModuleOptions;
+  useFactory: (
+    ...args: any[]
+  ) => Promise<VectorStorageModuleOptions> | VectorStorageModuleOptions;
   inject?: any[];
 }
 
 /**
  * Vector Storage Module
- * 
+ *
  * Provides vector storage capabilities with multi-backend support.
- * 
+ *
  * @example
  * ```typescript
  * // Synchronous configuration
@@ -58,7 +60,7 @@ export interface VectorStorageModuleAsyncOptions {
  *     }),
  *   ],
  * })
- * 
+ *
  * // Async configuration
  * @Module({
  *   imports: [

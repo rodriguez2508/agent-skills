@@ -178,7 +178,7 @@ export class IssueWorkflowAgent extends BaseAgent {
     userId: string,
   ): Promise<any> {
     const input = request.input;
-    const context = (request.options?.context as any) || {};
+    const context = request.options?.context || {};
 
     this.agentLogger.info(this.agentId, '📝 Starting new issue', {
       title: input.substring(0, 50),
@@ -416,13 +416,10 @@ export class IssueWorkflowAgent extends BaseAgent {
       issueId,
       IssueWorkflowStep.ANALYZE,
     );
-    await this.issueService.addKeyDecision(
-      issueId,
-      {
-        decision: 'Análisis completado',
-        rationale: `Analizado: ${input.substring(0, 100)}`,
-      },
-    );
+    await this.issueService.addKeyDecision(issueId, {
+      decision: 'Análisis completado',
+      rationale: `Analizado: ${input.substring(0, 100)}`,
+    });
 
     return {
       message: `🔍 **Análisis del Código**\n\nAnalizando: "${input.substring(0, 100)}..."\n\n**Estructura del proyecto:**\n- src/modules/* - Módulos por dominio\n- Clean Architecture con CQRS\n- TypeORM + PostgreSQL\n\n**Archivos relevantes encontrados:**\n- Entidades en domain/entities\n- Repositorios en infrastructure/persistence\n- Servicios en application/services`,

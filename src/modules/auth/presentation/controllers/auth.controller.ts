@@ -20,7 +20,13 @@ import {
   HttpStatus,
   UseGuards,
 } from '@nestjs/common';
-import { ApiTags, ApiOperation, ApiResponse, ApiParam, ApiBearerAuth } from '@nestjs/swagger';
+import {
+  ApiTags,
+  ApiOperation,
+  ApiResponse,
+  ApiParam,
+  ApiBearerAuth,
+} from '@nestjs/swagger';
 import { AuthService } from '../../application/services/auth.service';
 import {
   RegisterOrLoginDto,
@@ -86,7 +92,10 @@ export class AuthController {
     status: 201,
     description: 'User registered successfully. Verification email sent.',
   })
-  @ApiResponse({ status: 400, description: 'User with this email already exists' })
+  @ApiResponse({
+    status: 400,
+    description: 'User with this email already exists',
+  })
   async registerWithPassword(
     @Body() dto: RegisterWithPasswordDto,
     @Ip() ipAddress: string,
@@ -99,7 +108,8 @@ export class AuthController {
     });
 
     return {
-      message: 'User registered successfully. Please check your email to verify your account.',
+      message:
+        'User registered successfully. Please check your email to verify your account.',
       ...result,
     };
   }
@@ -131,12 +141,15 @@ export class AuthController {
   @Post('login')
   @ApiOperation({
     summary: 'Login user by email',
-    description: 'Authenticates an existing user by email and creates a new session.',
+    description:
+      'Authenticates an existing user by email and creates a new session.',
   })
   @ApiResponse({ status: 200, description: 'User logged in successfully' })
   @ApiResponse({ status: 400, description: 'User not found or inactive' })
   async login(@Body() dto: LoginByEmailDto, @Ip() ipAddress: string) {
-    this.logger.log(`🔐 Login request for email: ${dto.email} from IP: ${ipAddress}`);
+    this.logger.log(
+      `🔐 Login request for email: ${dto.email} from IP: ${ipAddress}`,
+    );
 
     const result = await this.authService.loginByEmail({
       email: dto.email,

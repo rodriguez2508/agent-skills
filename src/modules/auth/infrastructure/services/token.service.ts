@@ -51,7 +51,11 @@ export class TokenService {
   /**
    * Generate email verification token
    */
-  generateEmailVerificationToken(): { token: string; hashedToken: string; expires: Date } {
+  generateEmailVerificationToken(): {
+    token: string;
+    hashedToken: string;
+    expires: Date;
+  } {
     const token = this.generateToken();
     const hashedToken = this.hashToken(token);
     const expires = this.getTokenExpirationDate();
@@ -62,7 +66,11 @@ export class TokenService {
   /**
    * Generate password reset token
    */
-  generatePasswordResetToken(): { token: string; hashedToken: string; expires: Date } {
+  generatePasswordResetToken(): {
+    token: string;
+    hashedToken: string;
+    expires: Date;
+  } {
     const token = this.generateToken();
     const hashedToken = this.hashToken(token);
     const expires = this.getTokenExpirationDate();

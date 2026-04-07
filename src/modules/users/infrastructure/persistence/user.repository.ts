@@ -55,13 +55,17 @@ export class UserRepository implements IUserRepository {
         });
 
         if (user) {
-          this.logger.debug(`👤 User found by IP: ${user.id} (${data.ipAddress})`);
+          this.logger.debug(
+            `👤 User found by IP: ${user.id} (${data.ipAddress})`,
+          );
           return { user, isNew: false };
         }
 
         // Create new user for this IP with unique email
         const newUser = this.repository.create({
-          email: data.email || `user_${Date.now()}_${Math.random().toString(36).substring(2, 8)}@anonymous.local`,
+          email:
+            data.email ||
+            `user_${Date.now()}_${Math.random().toString(36).substring(2, 8)}@anonymous.local`,
           name: data.name,
           avatar: data.avatar,
           password: data.password,
@@ -75,7 +79,9 @@ export class UserRepository implements IUserRepository {
         });
 
         const savedUser = await this.repository.save(newUser);
-        this.logger.debug(`✨ New user created for IP ${data.ipAddress}: ${savedUser.id}`);
+        this.logger.debug(
+          `✨ New user created for IP ${data.ipAddress}: ${savedUser.id}`,
+        );
 
         return { user: savedUser, isNew: true };
       } catch (error) {
@@ -83,10 +89,14 @@ export class UserRepository implements IUserRepository {
 
         // Check if it's a unique constraint violation (race condition)
         if (error.code === '23505' || error.message.includes('duplicate key')) {
-          this.logger.debug(`⚠️ Race condition detected (attempt ${attempt}/${maxRetries}), retrying...`);
+          this.logger.debug(
+            `⚠️ Race condition detected (attempt ${attempt}/${maxRetries}), retrying...`,
+          );
 
           // Wait before retry (exponential backoff)
-          await new Promise(resolve => setTimeout(resolve, Math.pow(100, attempt)));
+          await new Promise((resolve) =>
+            setTimeout(resolve, Math.pow(100, attempt)),
+          );
           continue;
         }
 
@@ -101,12 +111,16 @@ export class UserRepository implements IUserRepository {
     });
 
     if (user) {
-      this.logger.debug(`👤 User found after retries: ${user.id} (${data.ipAddress})`);
+      this.logger.debug(
+        `👤 User found after retries: ${user.id} (${data.ipAddress})`,
+      );
       return { user, isNew: false };
     }
 
     // Last resort - throw error
-    throw new Error(`Failed to create/find user for IP ${data.ipAddress} after ${maxRetries} retries: ${lastError?.message}`);
+    throw new Error(
+      `Failed to create/find user for IP ${data.ipAddress} after ${maxRetries} retries: ${lastError?.message}`,
+    );
   }
 
   /**
@@ -125,7 +139,22 @@ export class UserRepository implements IUserRepository {
   async findByEmail(email: string): Promise<User | null> {
     return this.repository.findOne({
       where: { email },
-      select: ['id', 'email', 'name', 'avatar', 'active', 'emailVerified', 'password', 'preferences', 'totalSessions', 'totalSearches', 'lastIpAddress', 'ipAddressHistory', 'createdAt', 'updatedAt'],
+      select: [
+        'id',
+        'email',
+        'name',
+        'avatar',
+        'active',
+        'emailVerified',
+        'password',
+        'preferences',
+        'totalSessions',
+        'totalSearches',
+        'lastIpAddress',
+        'ipAddressHistory',
+        'createdAt',
+        'updatedAt',
+      ],
     });
   }
 
@@ -135,7 +164,26 @@ export class UserRepository implements IUserRepository {
   async findByEmailWithPassword(email: string): Promise<User | null> {
     return this.repository.findOne({
       where: { email },
-      select: ['id', 'email', 'name', 'avatar', 'active', 'emailVerified', 'password', 'preferences', 'totalSessions', 'totalSearches', 'lastIpAddress', 'ipAddressHistory', 'createdAt', 'updatedAt', 'emailVerificationToken', 'emailVerificationTokenExpires', 'resetPasswordToken', 'resetPasswordTokenExpires'],
+      select: [
+        'id',
+        'email',
+        'name',
+        'avatar',
+        'active',
+        'emailVerified',
+        'password',
+        'preferences',
+        'totalSessions',
+        'totalSearches',
+        'lastIpAddress',
+        'ipAddressHistory',
+        'createdAt',
+        'updatedAt',
+        'emailVerificationToken',
+        'emailVerificationTokenExpires',
+        'resetPasswordToken',
+        'resetPasswordTokenExpires',
+      ],
     });
   }
 
@@ -349,7 +397,9 @@ export class UserRepository implements IUserRepository {
       select: ['lastIpAddress'],
       where: { active: true },
     });
-    const uniqueIps = new Set(users.map((u) => u.lastIpAddress).filter(Boolean));
+    const uniqueIps = new Set(
+      users.map((u) => u.lastIpAddress).filter(Boolean),
+    );
 
     return {
       totalUsers,

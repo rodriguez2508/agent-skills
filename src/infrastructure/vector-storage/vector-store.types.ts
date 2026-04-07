@@ -53,25 +53,25 @@ export interface VectorStoreConfig {
  * Supported vector store backends
  */
 export type VectorStoreType =
-  | 'inmemory'      // In-memory for development
-  | 'sqlite'        // Local development with sqlite-vec
-  | 'chromadb'      // ChromaDB
-  | 'pinecone'      // Pinecone
-  | 'faiss'         // FAISS (Facebook AI Similarity Search)
-  | 'redis'         // Redis with RedisVL
-  | 'weaviate'      // Weaviate
-  | 'qdrant'        // Qdrant
-  | 'milvus'        // Milvus
-  | 'pgvector';     // PostgreSQL with pgvector
+  | 'inmemory' // In-memory for development
+  | 'sqlite' // Local development with sqlite-vec
+  | 'chromadb' // ChromaDB
+  | 'pinecone' // Pinecone
+  | 'faiss' // FAISS (Facebook AI Similarity Search)
+  | 'redis' // Redis with RedisVL
+  | 'weaviate' // Weaviate
+  | 'qdrant' // Qdrant
+  | 'milvus' // Milvus
+  | 'pgvector'; // PostgreSQL with pgvector
 
 /**
  * Distance metric for similarity search
  */
 export type DistanceMetric =
-  | 'cosine'       // Cosine similarity (default)
-  | 'euclidean'    // Euclidean (L2) distance
-  | 'dot'          // Dot product
-  | 'manhattan';   // Manhattan (L1) distance
+  | 'cosine' // Cosine similarity (default)
+  | 'euclidean' // Euclidean (L2) distance
+  | 'dot' // Dot product
+  | 'manhattan'; // Manhattan (L1) distance
 
 /**
  * Options for upsert operation

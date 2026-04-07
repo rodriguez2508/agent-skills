@@ -1,9 +1,8 @@
-import { MigrationInterface, QueryRunner } from "typeorm";
+import { MigrationInterface, QueryRunner } from 'typeorm';
 
 export class CreateIssuesTable1774358885139 implements MigrationInterface {
-
-    public async up(queryRunner: QueryRunner): Promise<void> {
-        await queryRunner.query(`
+  public async up(queryRunner: QueryRunner): Promise<void> {
+    await queryRunner.query(`
             CREATE TABLE "issues" (
                 "id" uuid PRIMARY KEY DEFAULT gen_random_uuid(),
                 "issue_id" varchar(50) NOT NULL,
@@ -31,18 +30,25 @@ export class CreateIssuesTable1774358885139 implements MigrationInterface {
             )
         `);
 
-        await queryRunner.query(`CREATE INDEX "IDX_issues_issue_id" ON "issues" ("issue_id")`);
-        await queryRunner.query(`CREATE INDEX "IDX_issues_status" ON "issues" ("status")`);
-        await queryRunner.query(`CREATE INDEX "IDX_issues_user_id" ON "issues" ("user_id")`);
-        await queryRunner.query(`CREATE INDEX "IDX_issues_last_session_id" ON "issues" ("last_session_id")`);
-    }
+    await queryRunner.query(
+      `CREATE INDEX "IDX_issues_issue_id" ON "issues" ("issue_id")`,
+    );
+    await queryRunner.query(
+      `CREATE INDEX "IDX_issues_status" ON "issues" ("status")`,
+    );
+    await queryRunner.query(
+      `CREATE INDEX "IDX_issues_user_id" ON "issues" ("user_id")`,
+    );
+    await queryRunner.query(
+      `CREATE INDEX "IDX_issues_last_session_id" ON "issues" ("last_session_id")`,
+    );
+  }
 
-    public async down(queryRunner: QueryRunner): Promise<void> {
-        await queryRunner.query(`DROP INDEX "IDX_issues_last_session_id"`);
-        await queryRunner.query(`DROP INDEX "IDX_issues_user_id"`);
-        await queryRunner.query(`DROP INDEX "IDX_issues_status"`);
-        await queryRunner.query(`DROP INDEX "IDX_issues_issue_id"`);
-        await queryRunner.query(`DROP TABLE "issues"`);
-    }
-
+  public async down(queryRunner: QueryRunner): Promise<void> {
+    await queryRunner.query(`DROP INDEX "IDX_issues_last_session_id"`);
+    await queryRunner.query(`DROP INDEX "IDX_issues_user_id"`);
+    await queryRunner.query(`DROP INDEX "IDX_issues_status"`);
+    await queryRunner.query(`DROP INDEX "IDX_issues_issue_id"`);
+    await queryRunner.query(`DROP TABLE "issues"`);
+  }
 }

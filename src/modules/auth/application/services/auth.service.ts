@@ -220,18 +220,20 @@ export class AuthService {
   /**
    * Update user preferences
    */
-  async updatePreferences(
-    userId: string,
-    preferences: any,
-  ): Promise<UserDto> {
-    const user = await this.userRepository.updatePreferences(userId, preferences);
+  async updatePreferences(userId: string, preferences: any): Promise<UserDto> {
+    const user = await this.userRepository.updatePreferences(
+      userId,
+      preferences,
+    );
     return this.mapUserToDto(user);
   }
 
   /**
    * Register user with email and password
    */
-  async registerWithPassword(data: RegisterWithPasswordDto): Promise<AuthResult> {
+  async registerWithPassword(
+    data: RegisterWithPasswordDto,
+  ): Promise<AuthResult> {
     // Check if user already exists
     const existingUser = await this.userRepository.findByEmail(data.email);
 
@@ -240,11 +242,16 @@ export class AuthService {
     }
 
     // Hash password
-    const hashedPassword = await this.passwordHashService.hashPassword(data.password);
+    const hashedPassword = await this.passwordHashService.hashPassword(
+      data.password,
+    );
 
     // Generate email verification token
-    const { token: verificationToken, hashedToken, expires } =
-      this.tokenService.generateEmailVerificationToken();
+    const {
+      token: verificationToken,
+      hashedToken,
+      expires,
+    } = this.tokenService.generateEmailVerificationToken();
 
     // Create user
     const { user } = await this.userRepository.findByIpOrCreate({
@@ -256,7 +263,11 @@ export class AuthService {
     });
 
     // Save verification token
-    await this.userRepository.setEmailVerificationToken(user.id, hashedToken, expires);
+    await this.userRepository.setEmailVerificationToken(
+      user.id,
+      hashedToken,
+      expires,
+    );
 
     // Send verification email
     const verificationUrl = `${this.frontendBaseUrl}/auth/verify-email?token=${verificationToken}`;
@@ -276,7 +287,9 @@ export class AuthService {
       },
     });
 
-    this.logger.log(`🔐 User registered with email: ${user.id} (${data.email})`);
+    this.logger.log(
+      `🔐 User registered with email: ${user.id} (${data.email})`,
+    );
 
     return {
       user: this.mapUserToDto(user),
@@ -321,7 +334,9 @@ export class AuthService {
       },
     });
 
-    this.logger.log(`🔐 User logged in with password: ${user.id} (${data.email})`);
+    this.logger.log(
+      `🔐 User logged in with password: ${user.id} (${data.email})`,
+    );
 
     return {
       user: this.mapUserToDto(user),
@@ -333,9 +348,12 @@ export class AuthService {
   /**
    * Verify email with token
    */
-  async verifyEmail(token: string): Promise<{ success: boolean; message: string }> {
+  async verifyEmail(
+    token: string,
+  ): Promise<{ success: boolean; message: string }> {
     const hashedToken = this.tokenService.hashToken(token);
-    const user = await this.userRepository.findByEmailVerificationToken(hashedToken);
+    const user =
+      await this.userRepository.findByEmailVerificationToken(hashedToken);
 
     if (!user) {
       throw new BadRequestException('Invalid or expired verification token');
@@ -373,11 +391,18 @@ export class AuthService {
     }
 
     // Generate reset token
-    const { token: resetToken, hashedToken, expires } =
-      this.tokenService.generatePasswordResetToken();
+    const {
+      token: resetToken,
+      hashedToken,
+      expires,
+    } = this.tokenService.generatePasswordResetToken();
 
     // Save reset token
-    await this.userRepository.setPasswordResetToken(user.id, hashedToken, expires);
+    await this.userRepository.setPasswordResetToken(
+      user.id,
+      hashedToken,
+      expires,
+    );
 
     // Send reset email
     const resetUrl = `${data.frontendUrl}/auth/reset-password?token=${resetToken}`;
@@ -387,7 +412,9 @@ export class AuthService {
       user.name,
     );
 
-    this.logger.log(`🔑 Password reset requested for user: ${user.id} (${data.email})`);
+    this.logger.log(
+      `🔑 Password reset requested for user: ${user.id} (${data.email})`,
+    );
 
     return {
       success: true,
@@ -403,14 +430,17 @@ export class AuthService {
     message: string;
   }> {
     const hashedToken = this.tokenService.hashToken(data.token);
-    const user = await this.userRepository.findByResetPasswordToken(hashedToken);
+    const user =
+      await this.userRepository.findByResetPasswordToken(hashedToken);
 
     if (!user) {
       throw new BadRequestException('Invalid or expired reset token');
     }
 
     // Hash new password
-    const hashedPassword = await this.passwordHashService.hashPassword(data.newPassword);
+    const hashedPassword = await this.passwordHashService.hashPassword(
+      data.newPassword,
+    );
 
     // Update password and clear reset token
     await this.userRepository.updatePassword(user.id, hashedPassword);
@@ -433,7 +463,7 @@ export class AuthService {
     newPassword: string,
   ): Promise<{ success: boolean; message: string }> {
     const user = await this.userRepository.findByEmailWithPassword(
-      await this.userRepository.findById(userId).then((u) => u?.email) || '',
+      (await this.userRepository.findById(userId).then((u) => u?.email)) || '',
     );
 
     if (!user || !user.password) {
@@ -451,7 +481,8 @@ export class AuthService {
     }
 
     // Hash and update new password
-    const hashedPassword = await this.passwordHashService.hashPassword(newPassword);
+    const hashedPassword =
+      await this.passwordHashService.hashPassword(newPassword);
     await this.userRepository.updatePassword(userId, hashedPassword);
 
     this.logger.log(`🔐 Password changed for user: ${userId}`);
@@ -489,7 +520,9 @@ export class AuthService {
    */
   async invalidateSession(sessionId: string, reason?: string): Promise<any> {
     const session = await this.sessionRepository.invalidate(sessionId, reason);
-    this.logger.warn(`🚫 Session invalidated: ${sessionId}${reason ? ` - ${reason}` : ''}`);
+    this.logger.warn(
+      `🚫 Session invalidated: ${sessionId}${reason ? ` - ${reason}` : ''}`,
+    );
     return session;
   }
 

@@ -1,6 +1,6 @@
 /**
  * Redis Module
- * 
+ *
  * Provides Redis connection with ioredis.
  * Used for caching, sessions, and rate limiting.
  */
@@ -24,9 +24,15 @@ export class RedisModule {
       provide: 'REDIS_CLIENT',
       useFactory: (configService: ConfigService) => {
         return new Redis({
-          host: configService.get<string>('REDIS_HOST', options?.host || 'localhost'),
+          host: configService.get<string>(
+            'REDIS_HOST',
+            options?.host || 'localhost',
+          ),
           port: configService.get<number>('REDIS_PORT', options?.port || 6379),
-          password: configService.get<string>('REDIS_PASSWORD') || options?.password || undefined,
+          password:
+            configService.get<string>('REDIS_PASSWORD') ||
+            options?.password ||
+            undefined,
           db: configService.get<number>('REDIS_DB', options?.db || 0),
           retryStrategy: (times: number) => {
             if (times > 3) {

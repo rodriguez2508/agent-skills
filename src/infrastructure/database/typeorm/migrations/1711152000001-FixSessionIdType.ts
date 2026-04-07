@@ -1,6 +1,6 @@
 /**
  * Migration: FixSessionIdType
- * 
+ *
  * Changes session_id from UUID to VARCHAR in sessions and chat_messages tables.
  */
 

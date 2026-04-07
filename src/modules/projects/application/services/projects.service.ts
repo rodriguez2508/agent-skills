@@ -20,7 +20,7 @@ export interface ProjectDetection {
 
 /**
  * Servicio de proyectos para gestión y detección automática
- * 
+ *
  * Características:
  * - Detección automática desde package.json
  * - Identificación de framework (Angular, NestJS, React, Vue)
@@ -35,7 +35,7 @@ export class ProjectsService {
 
   /**
    * Detecta proyecto desde package.json en un directorio dado
-   * 
+   *
    * @param projectPath - Path absoluto al directorio del proyecto
    * @returns Información detectada o null si no hay package.json
    */
@@ -62,7 +62,7 @@ export class ProjectsService {
 
   /**
    * Encuentra o crea proyecto para un usuario
-   * 
+   *
    * @param userId - ID del usuario
    * @param projectName - Nombre del proyecto
    * @param projectPath - Path opcional para detectar metadata
@@ -128,7 +128,7 @@ export class ProjectsService {
 
   /**
    * Detecta arquitectura basada en estructura de archivos
-   * 
+   *
    * @param projectPath - Path al proyecto
    * @returns Arquitectura detectada
    */

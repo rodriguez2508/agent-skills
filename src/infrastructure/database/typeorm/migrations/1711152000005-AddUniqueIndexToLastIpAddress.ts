@@ -18,18 +18,23 @@ export class AddUniqueIndexToLastIpAddress1711152000005 implements MigrationInte
     `);
 
     // Create unique index on lastIpAddress
-    await queryRunner.createIndex('users', new TableIndex({
-      name: 'IDX_USERS_LAST_IP_ADDRESS_UNIQUE',
-      columnNames: ['lastIpAddress'],
-      isUnique: true,
-      where: '"lastIpAddress" IS NOT NULL',
-    }));
+    await queryRunner.createIndex(
+      'users',
+      new TableIndex({
+        name: 'IDX_USERS_LAST_IP_ADDRESS_UNIQUE',
+        columnNames: ['lastIpAddress'],
+        isUnique: true,
+        where: '"lastIpAddress" IS NOT NULL',
+      }),
+    );
 
     console.log('✅ Migration applied: Added unique index on lastIpAddress');
   }
 
   public async down(queryRunner: QueryRunner): Promise<void> {
     await queryRunner.dropIndex('users', 'IDX_USERS_LAST_IP_ADDRESS_UNIQUE');
-    console.log('❌ Migration reverted: Removed unique index from lastIpAddress');
+    console.log(
+      '❌ Migration reverted: Removed unique index from lastIpAddress',
+    );
   }
 }

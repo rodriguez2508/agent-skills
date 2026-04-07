@@ -1,6 +1,9 @@
 import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { SearchEngine, SearchResult } from '@application/ports/search-engine.port';
+import {
+  SearchEngine,
+  SearchResult,
+} from '@application/ports/search-engine.port';
 import { Rule } from '@core/domain/entities/rule.entity';
 
 export interface BM25Config {
@@ -68,10 +71,17 @@ export class BM25Engine implements SearchEngine {
     return results.slice(0, limit);
   }
 
-  searchByCategory(query: string, category: string, limit: number = 10): SearchResult[] {
+  searchByCategory(
+    query: string,
+    category: string,
+    limit: number = 10,
+  ): SearchResult[] {
     const allResults = this.search(query, limit * 3);
     return allResults
-      .filter((result) => result.rule.category.toLowerCase() === category.toLowerCase())
+      .filter(
+        (result) =>
+          result.rule.category.toLowerCase() === category.toLowerCase(),
+      )
       .slice(0, limit);
   }
 
@@ -140,6 +150,8 @@ export class BM25Engine implements SearchEngine {
   private updateAvgDocLength(): void {
     const lengths = Array.from(this.docLengths.values());
     this.avgDocLength =
-      lengths.length > 0 ? lengths.reduce((a, b) => a + b, 0) / lengths.length : 0;
+      lengths.length > 0
+        ? lengths.reduce((a, b) => a + b, 0) / lengths.length
+        : 0;
   }
 }

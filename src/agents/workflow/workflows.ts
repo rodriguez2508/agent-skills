@@ -2,19 +2,19 @@ import { WorkflowStep, WorkflowContext } from './workflow-engine.service';
 
 /**
  * Workflows predefinidos para diferentes escenarios
- * 
+ *
  * Cada workflow define una secuencia de agentes a ejecutar
  * para cumplir un objetivo específico.
  */
 
 /**
  * Workflow para análisis completo de proyecto
- * 
+ *
  * Ejecuta en paralelo:
  * - AnalysisAgent: Analiza código y calidad
  * - ArchitectureAgent: Valida arquitectura
  * - MetricsAgent: Calcula métricas
- * 
+ *
  * Luego:
  * - RulesAgent: Busca reglas aplicables
  */
@@ -48,7 +48,7 @@ export const PROJECT_ANALYSIS_WORKFLOW: WorkflowStep[] = [
 
 /**
  * Workflow para migración de código
- * 
+ *
  * Secuencia:
  * 1. AnalysisAgent: Analiza código actual
  * 2. RulesAgent: Busca reglas de migración
@@ -87,7 +87,7 @@ export const CODE_MIGRATION_WORKFLOW: WorkflowStep[] = [
 
 /**
  * Workflow para creación de nueva feature
- * 
+ *
  * Secuencia:
  * 1. PMAgent: Crea issue y user story
  * 2. ArchitectureAgent: Valida diseño
@@ -135,7 +135,7 @@ export const FEATURE_CREATION_WORKFLOW: WorkflowStep[] = [
 
 /**
  * Workflow genérico de búsqueda
- * 
+ *
  * Ejecuta en paralelo:
  * - SearchAgent: Busca reglas BM25
  * - RulesAgent: Lista reglas relacionadas
@@ -164,7 +164,7 @@ export const SEARCH_WORKFLOW: WorkflowStep[] = [
 
 /**
  * Workflow para refactorización de código
- * 
+ *
  * Secuencia:
  * 1. AnalysisAgent: Identifica code smells
  * 2. ArchitectureAgent: Sugiere mejoras
@@ -209,7 +209,7 @@ export const REFACTORING_WORKFLOW: WorkflowStep[] = [
 
 /**
  * Workflow para debugging
- * 
+ *
  * Secuencia:
  * 1. AnalysisAgent: Analiza error
  * 2. RulesAgent: Busca reglas relacionadas
@@ -246,7 +246,7 @@ export const DEBUGGING_WORKFLOW: WorkflowStep[] = [
 
 /**
  * Workflow para onboarding de proyecto
- * 
+ *
  * Ejecuta en paralelo:
  * - AnalysisAgent: Analiza estructura
  * - ArchitectureAgent: Explica arquitectura
@@ -300,7 +300,7 @@ export const WORKFLOW_MAP: Record<string, WorkflowStep[]> = {
 
 /**
  * Obtiene el workflow adecuado según la intención detectada
- * 
+ *
  * @param intention - Intención detectada por RouterAgent
  * @returns Workflow de pasos o null si no hay workflow específico
  */
@@ -312,7 +312,7 @@ export function getWorkflowByIntention(
 
 /**
  * Detecta intención basada en el input del usuario
- * 
+ *
  * @param input - Input del usuario
  * @returns Intención detectada
  */

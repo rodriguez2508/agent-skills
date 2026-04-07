@@ -1,9 +1,9 @@
 /**
  * In-Memory Vector Store Implementation
- * 
+ *
  * Simple implementation for development and testing.
  * Uses cosine similarity for vector search.
- * 
+ *
  * NOTE: This is NOT persistent. For production, use ChromaDB, Pinecone, etc.
  */
 
@@ -34,7 +34,7 @@ interface VectorCollection {
 
 /**
  * In-memory implementation of IVectorStore
- * 
+ *
  * @example
  * ```typescript
  * const store = new InMemoryVectorStore();
@@ -74,7 +74,10 @@ export class InMemoryVectorStore implements IVectorStore {
     return this.connected;
   }
 
-  async createCollection(collectionName: string, dimension?: number): Promise<void> {
+  async createCollection(
+    collectionName: string,
+    dimension?: number,
+  ): Promise<void> {
     if (!this.connected) {
       throw new Error('VectorStore not connected. Call connect() first.');
     }
@@ -93,7 +96,9 @@ export class InMemoryVectorStore implements IVectorStore {
       updatedAt: new Date(),
     });
 
-    this.logger.log(`📁 [InMemoryVectorStore] Created collection: ${collectionName} (dimension: ${dimension || this.defaultDimension})`);
+    this.logger.log(
+      `📁 [InMemoryVectorStore] Created collection: ${collectionName} (dimension: ${dimension || this.defaultDimension})`,
+    );
   }
 
   async deleteCollection(collectionName: string): Promise<void> {
@@ -102,14 +107,19 @@ export class InMemoryVectorStore implements IVectorStore {
     }
 
     this.collections.delete(collectionName);
-    this.logger.log(`🗑️ [InMemoryVectorStore] Deleted collection: ${collectionName}`);
+    this.logger.log(
+      `🗑️ [InMemoryVectorStore] Deleted collection: ${collectionName}`,
+    );
   }
 
   async listCollections(): Promise<string[]> {
     return Array.from(this.collections.keys());
   }
 
-  async upsert(document: VectorDocument, options?: UpsertOptions): Promise<void> {
+  async upsert(
+    document: VectorDocument,
+    options?: UpsertOptions,
+  ): Promise<void> {
     if (!this.connected) {
       throw new Error('VectorStore not connected. Call connect() first.');
     }
@@ -123,9 +133,12 @@ export class InMemoryVectorStore implements IVectorStore {
     }
 
     // Validate dimension
-    if (collection.dimension && document.vector.length !== collection.dimension) {
+    if (
+      collection.dimension &&
+      document.vector.length !== collection.dimension
+    ) {
       throw new Error(
-        `Vector dimension mismatch. Expected ${collection.dimension}, got ${document.vector.length}`
+        `Vector dimension mismatch. Expected ${collection.dimension}, got ${document.vector.length}`,
       );
     }
 
@@ -134,32 +147,44 @@ export class InMemoryVectorStore implements IVectorStore {
 
     collection.documents.set(document.id, {
       ...document,
-      createdAt: exists ? collection.documents.get(document.id)!.createdAt : now,
+      createdAt: exists
+        ? collection.documents.get(document.id)!.createdAt
+        : now,
       updatedAt: now,
     });
 
     collection.updatedAt = now;
 
     this.logger.debug(
-      `📝 [InMemoryVectorStore] ${exists ? 'Updated' : 'Inserted'} document ${document.id} in ${collectionName}`
+      `📝 [InMemoryVectorStore] ${exists ? 'Updated' : 'Inserted'} document ${document.id} in ${collectionName}`,
     );
   }
 
-  async upsertBatch(documents: VectorDocument[], options?: UpsertOptions): Promise<void> {
+  async upsertBatch(
+    documents: VectorDocument[],
+    options?: UpsertOptions,
+  ): Promise<void> {
     if (!this.connected) {
       throw new Error('VectorStore not connected. Call connect() first.');
     }
 
-    this.logger.debug(`📦 [InMemoryVectorStore] Upserting batch of ${documents.length} documents`);
-    
+    this.logger.debug(
+      `📦 [InMemoryVectorStore] Upserting batch of ${documents.length} documents`,
+    );
+
     for (const document of documents) {
       await this.upsert(document, options);
     }
 
-    this.logger.log(`✅ [InMemoryVectorStore] Batch upsert completed: ${documents.length} documents`);
+    this.logger.log(
+      `✅ [InMemoryVectorStore] Batch upsert completed: ${documents.length} documents`,
+    );
   }
 
-  async search(query: number[], options?: SearchOptions): Promise<VectorSearchResult[]> {
+  async search(
+    query: number[],
+    options?: SearchOptions,
+  ): Promise<VectorSearchResult[]> {
     if (!this.connected) {
       throw new Error('VectorStore not connected. Call connect() first.');
     }
@@ -175,7 +200,9 @@ export class InMemoryVectorStore implements IVectorStore {
     const limit = options?.limit || 5;
     const filter = options?.filter;
 
-    this.logger.debug(`🔍 [InMemoryVectorStore] Searching in ${collectionName} (limit: ${limit})`);
+    this.logger.debug(
+      `🔍 [InMemoryVectorStore] Searching in ${collectionName} (limit: ${limit})`,
+    );
 
     const results: VectorSearchResult[] = [];
 
@@ -185,8 +212,12 @@ export class InMemoryVectorStore implements IVectorStore {
         continue;
       }
 
-      const score = this.calculateSimilarity(query, document.vector, collection.distanceMetric);
-      
+      const score = this.calculateSimilarity(
+        query,
+        document.vector,
+        collection.distanceMetric,
+      );
+
       results.push({
         document,
         score,
@@ -198,14 +229,19 @@ export class InMemoryVectorStore implements IVectorStore {
     results.sort((a, b) => b.score - a.score);
     const limitedResults = results.slice(0, limit);
 
-    this.logger.debug(`✅ [InMemoryVectorStore] Found ${limitedResults.length} results`);
+    this.logger.debug(
+      `✅ [InMemoryVectorStore] Found ${limitedResults.length} results`,
+    );
 
     return limitedResults;
   }
 
-  async getById(id: string, collectionName?: string): Promise<VectorDocument | null> {
+  async getById(
+    id: string,
+    collectionName?: string,
+  ): Promise<VectorDocument | null> {
     const collection = this.collections.get(collectionName || 'default');
-    
+
     if (!collection) {
       return null;
     }
@@ -215,13 +251,13 @@ export class InMemoryVectorStore implements IVectorStore {
 
   async delete(id: string, collectionName?: string): Promise<boolean> {
     const collection = this.collections.get(collectionName || 'default');
-    
+
     if (!collection) {
       return false;
     }
 
     const existed = collection.documents.delete(id);
-    
+
     if (existed) {
       collection.updatedAt = new Date();
       this.logger.debug(`🗑️ [InMemoryVectorStore] Deleted document ${id}`);
@@ -230,9 +266,12 @@ export class InMemoryVectorStore implements IVectorStore {
     return existed;
   }
 
-  async deleteByFilter(filter: VectorFilter, collectionName?: string): Promise<number> {
+  async deleteByFilter(
+    filter: VectorFilter,
+    collectionName?: string,
+  ): Promise<number> {
     const collection = this.collections.get(collectionName || 'default');
-    
+
     if (!collection) {
       return 0;
     }
@@ -248,7 +287,9 @@ export class InMemoryVectorStore implements IVectorStore {
 
     if (deletedCount > 0) {
       collection.updatedAt = new Date();
-      this.logger.log(`🗑️ [InMemoryVectorStore] Deleted ${deletedCount} documents by filter`);
+      this.logger.log(
+        `🗑️ [InMemoryVectorStore] Deleted ${deletedCount} documents by filter`,
+      );
     }
 
     return deletedCount;
@@ -274,7 +315,7 @@ export class InMemoryVectorStore implements IVectorStore {
 
   async healthCheck(): Promise<VectorStoreHealth> {
     const startTime = Date.now();
-    
+
     try {
       if (!this.connected) {
         return {
@@ -314,8 +355,10 @@ export class InMemoryVectorStore implements IVectorStore {
 
     collection.documents.clear();
     collection.updatedAt = new Date();
-    
-    this.logger.log(`🧹 [InMemoryVectorStore] Cleared collection: ${collectionName || 'default'}`);
+
+    this.logger.log(
+      `🧹 [InMemoryVectorStore] Cleared collection: ${collectionName || 'default'}`,
+    );
   }
 
   /**
@@ -324,7 +367,7 @@ export class InMemoryVectorStore implements IVectorStore {
   private calculateSimilarity(
     vector1: number[],
     vector2: number[],
-    metric: DistanceMetric = 'cosine'
+    metric: DistanceMetric = 'cosine',
   ): number {
     switch (metric) {
       case 'cosine':
@@ -387,7 +430,10 @@ export class InMemoryVectorStore implements IVectorStore {
     }
 
     // Normalize to 0-1 range
-    const maxPossible = vector1.length * Math.max(...vector1.map(Math.abs)) * Math.max(...vector2.map(Math.abs));
+    const maxPossible =
+      vector1.length *
+      Math.max(...vector1.map(Math.abs)) *
+      Math.max(...vector2.map(Math.abs));
     return maxPossible === 0 ? 0 : sum / maxPossible;
   }
 

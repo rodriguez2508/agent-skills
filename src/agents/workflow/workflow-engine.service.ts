@@ -10,27 +10,27 @@ export interface WorkflowContext {
    * Input original del usuario
    */
   userInput: string;
-  
+
   /**
    * ID del proyecto (opcional)
    */
   projectId?: string;
-  
+
   /**
    * ID del usuario (opcional)
    */
   userId?: string;
-  
+
   /**
    * ID del issue (opcional)
    */
   issueId?: string;
-  
+
   /**
    * Respuestas previas de agentes
    */
   previousResponses: Record<string, AgentResponse>;
-  
+
   /**
    * Metadata adicional
    */
@@ -45,17 +45,17 @@ export interface WorkflowStep {
    * ID del agente a ejecutar
    */
   agentId: string;
-  
+
   /**
    * Orden de ejecución (menor = primero)
    */
   order: number;
-  
+
   /**
    * Si es true, se ejecuta en paralelo con otros pasos del mismo orden
    */
   parallel?: boolean;
-  
+
   /**
    * Condición opcional para ejecutar este paso
    */
@@ -64,10 +64,10 @@ export interface WorkflowStep {
 
 /**
  * WorkflowEngine - Orquestador de agentes especializados
- * 
+ *
  * Ejecuta workflows definidos como secuencias de pasos de agentes.
  * Soporta ejecución secuencial y paralela.
- * 
+ *
  * @example
  * // Workflow de análisis de proyecto
  * const workflow: WorkflowStep[] = [
@@ -76,7 +76,7 @@ export interface WorkflowStep {
  *   { agentId: 'MetricsAgent', order: 1, parallel: true },
  *   { agentId: 'RulesAgent', order: 2 },
  * ];
- * 
+ *
  * const results = await workflowEngine.executeWorkflow(workflow, context);
  */
 @Injectable()
@@ -87,7 +87,7 @@ export class WorkflowEngine {
 
   /**
    * Ejecuta un workflow definido
-   * 
+   *
    * @param steps - Pasos del workflow
    * @param context - Contexto de ejecución
    * @returns Resultados de cada agente ejecutado
@@ -104,13 +104,16 @@ export class WorkflowEngine {
     const startTime = Date.now();
 
     // Agrupar steps por orden
-    const stepsByOrder = steps.reduce((acc, step) => {
-      if (!acc[step.order]) {
-        acc[step.order] = [];
-      }
-      acc[step.order].push(step);
-      return acc;
-    }, {} as Record<number, WorkflowStep[]>);
+    const stepsByOrder = steps.reduce(
+      (acc, step) => {
+        if (!acc[step.order]) {
+          acc[step.order] = [];
+        }
+        acc[step.order].push(step);
+        return acc;
+      },
+      {} as Record<number, WorkflowStep[]>,
+    );
 
     // Ejecutar órdenes secuencialmente
     const orders = Object.keys(stepsByOrder)
@@ -121,7 +124,9 @@ export class WorkflowEngine {
 
     for (const order of orders) {
       const currentSteps = stepsByOrder[order];
-      this.logger.log(`⚙️ Executing order ${order} with ${currentSteps.length} step(s)`);
+      this.logger.log(
+        `⚙️ Executing order ${order} with ${currentSteps.length} step(s)`,
+      );
 
       // Separar paralelos y secuenciales
       const parallelSteps = currentSteps.filter((s) => s.parallel);
@@ -143,9 +148,7 @@ export class WorkflowEngine {
       // Ejecutar secuenciales
       for (const step of sequentialSteps) {
         if (step.condition && !step.condition(context)) {
-          this.logger.log(
-            `⏭️ Skipping ${step.agentId} (condition not met)`,
-          );
+          this.logger.log(`⏭️ Skipping ${step.agentId} (condition not met)`);
           continue; // Saltar si no cumple condición
         }
 
@@ -181,7 +184,9 @@ export class WorkflowEngine {
   ): Promise<Record<string, AgentResponse>> {
     const executions = steps.map(async (step) => {
       if (step.condition && !step.condition(context)) {
-        this.logger.log(`⏭️ Skipping ${step.agentId} (parallel, condition not met)`);
+        this.logger.log(
+          `⏭️ Skipping ${step.agentId} (parallel, condition not met)`,
+        );
         return null;
       }
 
@@ -192,15 +197,18 @@ export class WorkflowEngine {
 
     const results = await Promise.all(executions);
 
-    return results.reduce((acc, r) => {
-      if (r) {
-        acc[r.agentId] = r.result;
-        this.logger.log(
-          `✅ ${r.agentId} completed (parallel) | Success: ${r.result.success}`,
-        );
-      }
-      return acc;
-    }, {} as Record<string, AgentResponse>);
+    return results.reduce(
+      (acc, r) => {
+        if (r) {
+          acc[r.agentId] = r.result;
+          this.logger.log(
+            `✅ ${r.agentId} completed (parallel) | Success: ${r.result.success}`,
+          );
+        }
+        return acc;
+      },
+      {} as Record<string, AgentResponse>,
+    );
   }
 
   /**
@@ -258,9 +266,7 @@ export class WorkflowEngine {
       };
     } catch (error) {
       const executionTime = Date.now() - startTime;
-      this.logger.error(
-        `❌ Agent ${agentId} failed | Error: ${error.message}`,
-      );
+      this.logger.error(`❌ Agent ${agentId} failed | Error: ${error.message}`);
 
       return {
         success: false,
@@ -294,7 +300,10 @@ export class WorkflowEngine {
   /**
    * Valida si un workflow es válido
    */
-  validateWorkflow(steps: WorkflowStep[]): { valid: boolean; errors: string[] } {
+  validateWorkflow(steps: WorkflowStep[]): {
+    valid: boolean;
+    errors: string[];
+  } {
     const errors: string[] = [];
 
     if (steps.length === 0) {

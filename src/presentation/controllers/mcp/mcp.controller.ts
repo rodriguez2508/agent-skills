@@ -277,6 +277,12 @@ export class McpController {
     }
 
     let text = '';
+
+    // Web search results
+    if (data.data?.formattedResults) {
+      text += data.data.formattedResults + '\n\n';
+    }
+    // Message from agent
     if (data.data?.message) {
       text += data.data.message + '\n\n';
     }
@@ -343,7 +349,13 @@ export class McpController {
     },
     @Req() req: Request,
   ) {
-    const { input, options, sessionId: providedSessionId, projectPath, projectContext } = body;
+    const {
+      input,
+      options,
+      sessionId: providedSessionId,
+      projectPath,
+      projectContext,
+    } = body;
 
     if (!input || input.trim().length === 0) {
       return {
@@ -695,7 +707,7 @@ export class McpController {
 
       await this.mcpService['sessionRepository']
         .getRepository()
-        .update({ sessionId }, { metadata: updatedMetadata as any });
+        .update({ sessionId }, { metadata: updatedMetadata });
 
       this.logger.debug(`📝 Session updated with rules context: ${sessionId}`);
     } catch (error) {

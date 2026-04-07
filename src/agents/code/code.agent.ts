@@ -10,13 +10,8 @@ import { AgentLoggerService } from '@infrastructure/logging/agent-logger.service
  */
 @Injectable()
 export class CodeAgent extends BaseAgent {
-  constructor(
-    private readonly agentLogger: AgentLoggerService,
-  ) {
-    super(
-      'CodeAgent',
-      'Genera y valida código siguiendo mejores prácticas',
-    );
+  constructor(private readonly agentLogger: AgentLoggerService) {
+    super('CodeAgent', 'Genera y valida código siguiendo mejores prácticas');
   }
 
   /**
@@ -25,11 +20,11 @@ export class CodeAgent extends BaseAgent {
    */
   protected async handle(request: AgentRequest): Promise<any> {
     const codeRequest = request.input;
-    const language = request.options?.language as string || 'typescript';
-    
+    const language = (request.options?.language as string) || 'typescript';
+
     // EXTRACT RULES CONTEXT from RouterAgent
-    const relevantRules = request.options?.relevantRules as any[] || [];
-    const rulesContext = request.options?.rulesContext as string || '';
+    const relevantRules = (request.options?.relevantRules as any[]) || [];
+    const rulesContext = (request.options?.rulesContext as string) || '';
 
     this.agentLogger.info(this.agentId, 'Generando código', {
       request: codeRequest.substring(0, 50),
@@ -41,12 +36,14 @@ export class CodeAgent extends BaseAgent {
     const codeSnippet = this.generateCodeWithRules(codeRequest, relevantRules);
 
     // EXTRACT RULES TO APPLY from the relevant rules
-    const appliedRules = relevantRules.map(rule => ({
-      id: rule.id,
-      name: rule.name,
-      category: rule.category,
-      appliedTo: this.getRuleApplication(rule, codeRequest),
-    })).filter(rule => rule.appliedTo !== null);
+    const appliedRules = relevantRules
+      .map((rule) => ({
+        id: rule.id,
+        name: rule.name,
+        category: rule.category,
+        appliedTo: this.getRuleApplication(rule, codeRequest),
+      }))
+      .filter((rule) => rule.appliedTo !== null);
 
     return {
       message: `✅ Código generado siguiendo ${appliedRules.length} reglas relevantes:`,
@@ -63,16 +60,23 @@ export class CodeAgent extends BaseAgent {
    */
   private generateCodeWithRules(request: string, rules: any[]): string {
     // Check for specific rule patterns and apply them
-    const hasDependencyInjection = rules.some(r => 
-      r.id.includes('di-') || r.id.includes('dependency') || r.content.toLowerCase().includes('dependency injection')
+    const hasDependencyInjection = rules.some(
+      (r) =>
+        r.id.includes('di-') ||
+        r.id.includes('dependency') ||
+        r.content.toLowerCase().includes('dependency injection'),
     );
-    
-    const hasCleanArchitecture = rules.some(r => 
-      r.id.includes('clean') || r.content.toLowerCase().includes('clean architecture')
+
+    const hasCleanArchitecture = rules.some(
+      (r) =>
+        r.id.includes('clean') ||
+        r.content.toLowerCase().includes('clean architecture'),
     );
-    
-    const hasRepositoryPattern = rules.some(r => 
-      r.id.includes('repository') || r.content.toLowerCase().includes('repository')
+
+    const hasRepositoryPattern = rules.some(
+      (r) =>
+        r.id.includes('repository') ||
+        r.content.toLowerCase().includes('repository'),
     );
 
     let code = `// Código generado para: ${request}\n`;
@@ -107,7 +111,11 @@ export class CodeAgent extends BaseAgent {
     }
 
     // Default code if no specific rules matched
-    if (!hasDependencyInjection && !hasCleanArchitecture && !hasRepositoryPattern) {
+    if (
+      !hasDependencyInjection &&
+      !hasCleanArchitecture &&
+      !hasRepositoryPattern
+    ) {
       code += `export class GeneratedClass {\n`;
       code += `  // Implementation for: ${request}\n`;
       code += `}\n`;
@@ -128,7 +136,7 @@ export class CodeAgent extends BaseAgent {
       ];
     }
 
-    return rules.map(rule => {
+    return rules.map((rule) => {
       if (rule.impact === 'CRITICAL') {
         return `⚠️ [CRITICAL] ${rule.name}`;
       }
@@ -145,15 +153,15 @@ export class CodeAgent extends BaseAgent {
   private getRuleApplication(rule: any, request: string): string | null {
     const requestLower = request.toLowerCase();
     const contentLower = rule.content.toLowerCase();
-    
+
     // Check if rule content mentions keywords from the request
-    const keywords = requestLower.split(/\s+/).filter(w => w.length > 3);
-    const matches = keywords.some(keyword => contentLower.includes(keyword));
-    
+    const keywords = requestLower.split(/\s+/).filter((w) => w.length > 3);
+    const matches = keywords.some((keyword) => contentLower.includes(keyword));
+
     if (matches) {
       return `Applied to: "${request.substring(0, 50)}..."`;
     }
-    
+
     return null;
   }
 
@@ -175,6 +183,8 @@ export class CodeAgent extends BaseAgent {
       'controlador',
     ];
 
-    return codeKeywords.some((keyword) => input.toLowerCase().includes(keyword));
+    return codeKeywords.some((keyword) =>
+      input.toLowerCase().includes(keyword),
+    );
   }
 }

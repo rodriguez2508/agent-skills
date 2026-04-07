@@ -21,8 +21,10 @@ export abstract class BaseAgent implements IAgent {
    */
   async execute(request: AgentRequest): Promise<AgentResponse> {
     const startTime = Date.now();
-    
-    this.logger.log(`📥 Ejecutando con input: "${request.input.substring(0, 50)}..."`);
+
+    this.logger.log(
+      `📥 Ejecutando con input: "${request.input.substring(0, 50)}..."`,
+    );
 
     try {
       const data = await this.handle(request);
@@ -41,8 +43,9 @@ export abstract class BaseAgent implements IAgent {
       };
     } catch (error) {
       const executionTime = Date.now() - startTime;
-      const errorMessage = error instanceof Error ? error.message : 'Error desconocido';
-      
+      const errorMessage =
+        error instanceof Error ? error.message : 'Error desconocido';
+
       this.logger.error(`❌ Error: ${errorMessage}`);
 
       return {

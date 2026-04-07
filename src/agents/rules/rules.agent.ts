@@ -17,10 +17,7 @@ export class RulesAgent extends BaseAgent {
     private readonly agentLogger: AgentLoggerService,
     private readonly rulesEngine: RulesEngine,
   ) {
-    super(
-      'RulesAgent',
-      'Manages and lists available code rules',
-    );
+    super('RulesAgent', 'Manages and lists available code rules');
   }
 
   /**
@@ -47,10 +44,12 @@ export class RulesAgent extends BaseAgent {
 
     if (rules.length === 0) {
       return {
-        message: "I don't have any rules available at the moment. Check back later as we're constantly adding new best practices!",
+        message:
+          "I don't have any rules available at the moment. Check back later as we're constantly adding new best practices!",
         category,
         rules: [],
-        suggestion: 'You can ask about: "Clean Architecture", "CQRS", "NestJS", or "TypeScript" rules',
+        suggestion:
+          'You can ask about: "Clean Architecture", "CQRS", "NestJS", or "TypeScript" rules',
       };
     }
 
@@ -80,13 +79,16 @@ export class RulesAgent extends BaseAgent {
    * Groups rules by category
    */
   private groupByCategory(rules: any[]): Record<string, any[]> {
-    return rules.reduce((acc, rule) => {
-      if (!acc[rule.category]) {
-        acc[rule.category] = [];
-      }
-      acc[rule.category].push(rule);
-      return acc;
-    }, {} as Record<string, any[]>);
+    return rules.reduce(
+      (acc, rule) => {
+        if (!acc[rule.category]) {
+          acc[rule.category] = [];
+        }
+        acc[rule.category].push(rule);
+        return acc;
+      },
+      {} as Record<string, any[]>,
+    );
   }
 
   /**
@@ -94,9 +96,9 @@ export class RulesAgent extends BaseAgent {
    */
   async getRuleById(id: string): Promise<any> {
     this.agentLogger.info(this.agentId, `Getting rule: ${id}`);
-    
+
     const rule = this.rulesEngine.getRuleById(id);
-    
+
     if (!rule) {
       this.agentLogger.warn(this.agentId, `Rule not found: ${id}`);
       return null;
@@ -132,6 +134,8 @@ export class RulesAgent extends BaseAgent {
       'available rules',
     ];
 
-    return rulesKeywords.some((keyword) => input.toLowerCase().includes(keyword));
+    return rulesKeywords.some((keyword) =>
+      input.toLowerCase().includes(keyword),
+    );
   }
 }

@@ -22,7 +22,7 @@ export interface FeatureValidationResult {
 
 /**
  * Servicio de validación de arquitectura frontend
- * 
+ *
  * Valida que un proyecto Angular cumpla con las reglas de arquitectura
  */
 @Injectable()
@@ -48,7 +48,7 @@ export class FrontendValidationService {
     for (const dir of requiredDirs) {
       const dirPath = path.join(featurePath, dir);
       const exists = await this.directoryExists(dirPath);
-      
+
       if (!exists) {
         result.passed = false;
         result.errors.push(`❌ Missing required directory: ${dir}/`);
@@ -87,7 +87,7 @@ export class FrontendValidationService {
     // Validar archivo de rutas
     const routesFile = path.join(featurePath, `${feature}.routes.ts`);
     const routesExists = await this.fileExists(routesFile);
-    
+
     if (!routesExists) {
       result.passed = false;
       result.errors.push(`❌ Missing routes file: ${feature}.routes.ts`);
@@ -113,28 +113,38 @@ export class FrontendValidationService {
     if (await this.directoryExists(contextPath)) {
       const contextResults = await this.validateContextStructure(contextPath);
       result.results.push(...contextResults);
-      
-      const contextErrors = contextResults.filter(r => !r.passed && r.rule.severity === 'ERROR');
+
+      const contextErrors = contextResults.filter(
+        (r) => !r.passed && r.rule.severity === 'ERROR',
+      );
       if (contextErrors.length > 0) {
         result.passed = false;
-        result.errors.push(...contextErrors.map(e => e.message));
+        result.errors.push(...contextErrors.map((e) => e.message));
       }
     }
 
     // Validar reglas en archivos
     const fileResults = await this.validateFiles(featurePath);
     result.results.push(...fileResults);
-    
-    const fileErrors = fileResults.filter(r => !r.passed && r.rule.severity === 'ERROR');
-    const fileWarnings = fileResults.filter(r => !r.passed && r.rule.severity === 'WARNING');
-    
+
+    const fileErrors = fileResults.filter(
+      (r) => !r.passed && r.rule.severity === 'ERROR',
+    );
+    const fileWarnings = fileResults.filter(
+      (r) => !r.passed && r.rule.severity === 'WARNING',
+    );
+
     if (fileErrors.length > 0) {
       result.passed = false;
-      result.errors.push(...fileErrors.map(e => `${e.message} in ${e.file || 'unknown'}`));
+      result.errors.push(
+        ...fileErrors.map((e) => `${e.message} in ${e.file || 'unknown'}`),
+      );
     }
-    
+
     if (fileWarnings.length > 0) {
-      result.warnings.push(...fileWarnings.map(w => `${w.message} in ${w.file || 'unknown'}`));
+      result.warnings.push(
+        ...fileWarnings.map((w) => `${w.message} in ${w.file || 'unknown'}`),
+      );
     }
 
     return result;
@@ -143,13 +153,19 @@ export class FrontendValidationService {
   /**
    * Valida la estructura del context (Clean Architecture + CQRS)
    */
-  private async validateContextStructure(contextPath: string): Promise<ValidationResult[]> {
+  private async validateContextStructure(
+    contextPath: string,
+  ): Promise<ValidationResult[]> {
     const results: ValidationResult[] = [];
 
     // Domain layer
-    const domainEntities = await this.directoryExists(path.join(contextPath, 'domain/entities'));
-    const domainRepos = await this.directoryExists(path.join(contextPath, 'domain/repositories'));
-    
+    const domainEntities = await this.directoryExists(
+      path.join(contextPath, 'domain/entities'),
+    );
+    const domainRepos = await this.directoryExists(
+      path.join(contextPath, 'domain/repositories'),
+    );
+
     results.push({
       rule: {
         id: 'ctx-001',
@@ -162,16 +178,23 @@ export class FrontendValidationService {
         successMessage: '',
       },
       passed: domainEntities && domainRepos,
-      message: domainEntities && domainRepos 
-        ? 'Domain layer correctly structured' 
-        : 'Missing domain/entities/ or domain/repositories/',
+      message:
+        domainEntities && domainRepos
+          ? 'Domain layer correctly structured'
+          : 'Missing domain/entities/ or domain/repositories/',
     });
 
     // Application layer
-    const appCommands = await this.directoryExists(path.join(contextPath, 'application/commands'));
-    const appQueries = await this.directoryExists(path.join(contextPath, 'application/queries'));
-    const appFacade = await this.fileExists(path.join(contextPath, 'application/facade.ts'));
-    
+    const appCommands = await this.directoryExists(
+      path.join(contextPath, 'application/commands'),
+    );
+    const appQueries = await this.directoryExists(
+      path.join(contextPath, 'application/queries'),
+    );
+    const appFacade = await this.fileExists(
+      path.join(contextPath, 'application/facade.ts'),
+    );
+
     results.push({
       rule: {
         id: 'ctx-002',
@@ -184,16 +207,23 @@ export class FrontendValidationService {
         successMessage: '',
       },
       passed: appCommands && appQueries && appFacade,
-      message: appCommands && appQueries && appFacade 
-        ? 'Application layer correctly structured with CQRS' 
-        : 'Missing application/commands/, application/queries/, or application/facade.ts',
+      message:
+        appCommands && appQueries && appFacade
+          ? 'Application layer correctly structured with CQRS'
+          : 'Missing application/commands/, application/queries/, or application/facade.ts',
     });
 
     // Infrastructure layer
-    const infraApi = await this.directoryExists(path.join(contextPath, 'infrastructure/api'));
-    const infraState = await this.directoryExists(path.join(contextPath, 'infrastructure/state'));
-    const infraRepos = await this.directoryExists(path.join(contextPath, 'infrastructure/repositories'));
-    
+    const infraApi = await this.directoryExists(
+      path.join(contextPath, 'infrastructure/api'),
+    );
+    const infraState = await this.directoryExists(
+      path.join(contextPath, 'infrastructure/state'),
+    );
+    const infraRepos = await this.directoryExists(
+      path.join(contextPath, 'infrastructure/repositories'),
+    );
+
     results.push({
       rule: {
         id: 'ctx-003',
@@ -206,9 +236,10 @@ export class FrontendValidationService {
         successMessage: '',
       },
       passed: infraApi && infraState && infraRepos,
-      message: infraApi && infraState && infraRepos 
-        ? 'Infrastructure layer correctly structured' 
-        : 'Missing infrastructure/api/, infrastructure/state/, or infrastructure/repositories/',
+      message:
+        infraApi && infraState && infraRepos
+          ? 'Infrastructure layer correctly structured'
+          : 'Missing infrastructure/api/, infrastructure/state/, or infrastructure/repositories/',
     });
 
     return results;
@@ -217,7 +248,9 @@ export class FrontendValidationService {
   /**
    * Valida reglas en archivos específicos
    */
-  private async validateFiles(featurePath: string): Promise<ValidationResult[]> {
+  private async validateFiles(
+    featurePath: string,
+  ): Promise<ValidationResult[]> {
     const results: ValidationResult[] = [];
 
     // Buscar todos los archivos TypeScript
@@ -230,7 +263,7 @@ export class FrontendValidationService {
       // Validar stores (No God Stores)
       if (relativePath.includes('.store.ts')) {
         const signalCount = (content.match(/signal</g) || []).length;
-        
+
         if (signalCount > 5) {
           results.push({
             rule: {
@@ -250,7 +283,10 @@ export class FrontendValidationService {
         }
 
         // Validar que no haya lógica de sockets en stores
-        const hasSocketLogic = /(socket\.|WebSocket|fromEventPattern.*socket|\.listen\()/i.test(content);
+        const hasSocketLogic =
+          /(socket\.|WebSocket|fromEventPattern.*socket|\.listen\()/i.test(
+            content,
+          );
         if (hasSocketLogic) {
           results.push({
             rule: {
@@ -265,17 +301,21 @@ export class FrontendValidationService {
             },
             passed: false,
             file: relativePath,
-            message: 'Socket logic found in Store. Move to infrastructure/socket/',
+            message:
+              'Socket logic found in Store. Move to infrastructure/socket/',
           });
         }
       }
 
       // Validar componentes de vistas
-      if (relativePath.includes('views/') && relativePath.endsWith('.component.ts')) {
+      if (
+        relativePath.includes('views/') &&
+        relativePath.endsWith('.component.ts')
+      ) {
         // Validar standalone + OnPush
         const isStandalone = /standalone:\s*true/.test(content);
         const isOnPush = /ChangeDetectionStrategy\.OnPush/.test(content);
-        
+
         if (!isStandalone || !isOnPush) {
           results.push({
             rule: {
@@ -315,7 +355,8 @@ export class FrontendValidationService {
         }
 
         // Validar que no haga llamadas HTTP directas
-        const hasDirectHttp = /(HttpClient|\.get\(|\.post\(|\.put\(|\.delete\()/.test(content);
+        const hasDirectHttp =
+          /(HttpClient|\.get\(|\.post\(|\.put\(|\.delete\()/.test(content);
         if (hasDirectHttp) {
           results.push({
             rule: {
@@ -330,15 +371,19 @@ export class FrontendValidationService {
             },
             passed: false,
             file: relativePath,
-            message: 'Direct HTTP call in component. Use Facade → Command → API service instead.',
+            message:
+              'Direct HTTP call in component. Use Facade → Command → API service instead.',
           });
         }
       }
 
       // Validar naming conventions
       const fileName = path.basename(file, '.ts');
-      
-      if (relativePath.includes('commands/') && relativePath.endsWith('.command.ts')) {
+
+      if (
+        relativePath.includes('commands/') &&
+        relativePath.endsWith('.command.ts')
+      ) {
         const isValidName = /^[A-Z][a-zA-Z]*Command$/.test(fileName);
         if (!isValidName) {
           results.push({
@@ -359,7 +404,10 @@ export class FrontendValidationService {
         }
       }
 
-      if (relativePath.includes('queries/') && relativePath.endsWith('.query.ts')) {
+      if (
+        relativePath.includes('queries/') &&
+        relativePath.endsWith('.query.ts')
+      ) {
         const isValidName = /^Get[A-Z][a-zA-Z]*Query$/.test(fileName);
         if (!isValidName) {
           results.push({
@@ -417,7 +465,11 @@ export class FrontendValidationService {
       for (const entry of entries) {
         const fullPath = path.join(dir, entry.name);
 
-        if (entry.isDirectory() && !entry.name.startsWith('.') && entry.name !== 'node_modules') {
+        if (
+          entry.isDirectory() &&
+          !entry.name.startsWith('.') &&
+          entry.name !== 'node_modules'
+        ) {
           const subFiles = await this.findFiles(fullPath, extension);
           files.push(...subFiles);
         } else if (entry.isFile() && entry.name.endsWith(extension)) {
@@ -472,7 +524,7 @@ export class FrontendValidationService {
     const features: FeatureValidationResult[] = [];
 
     // Verificar si existe el directorio de features
-    if (!await this.directoryExists(featuresPath)) {
+    if (!(await this.directoryExists(featuresPath))) {
       this.logger.warn(`Features directory not found: ${featuresPath}`);
       return {
         passed: false,
@@ -488,20 +540,23 @@ export class FrontendValidationService {
 
     // Obtener todos los features
     const featureDirs = await fs.readdir(featuresPath);
-    
+
     for (const feature of featureDirs) {
       const featurePath = path.join(featuresPath, feature);
       const stat = await fs.stat(featurePath);
-      
+
       if (stat.isDirectory()) {
         const result = await this.validateFeature(featurePath);
         features.push(result);
       }
     }
 
-    const passedFeatures = features.filter(f => f.passed).length;
+    const passedFeatures = features.filter((f) => f.passed).length;
     const totalErrors = features.reduce((sum, f) => sum + f.errors.length, 0);
-    const totalWarnings = features.reduce((sum, f) => sum + f.warnings.length, 0);
+    const totalWarnings = features.reduce(
+      (sum, f) => sum + f.warnings.length,
+      0,
+    );
 
     return {
       passed: totalErrors === 0,

@@ -27,7 +27,8 @@ const API_URL = `http://localhost:${PORT}`;
 const TOOLS = [
   {
     name: 'agent_query',
-    description: 'Consulta principal con agentes especializados. Auto-detecta intención y enruta al agente correcto (PMAgent, CodeAgent, SearchAgent, etc.). Crea issues automáticamente y mantiene historial.',
+    description:
+      'Consulta principal con agentes especializados. Auto-detecta intención y enruta al agente correcto (PMAgent, CodeAgent, SearchAgent, etc.). Crea issues automáticamente y mantiene historial.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -53,13 +54,15 @@ const TOOLS = [
   },
   {
     name: 'search_rules',
-    description: 'Busca reglas de código usando BM25. Devuelve reglas relevantes con el prefijo "Según CodeMentor MCP"',
+    description:
+      'Busca reglas de código usando BM25. Devuelve reglas relevantes con el prefijo "Según CodeMentor MCP"',
     inputSchema: {
       type: 'object',
       properties: {
         query: {
           type: 'string',
-          description: 'Término de búsqueda (ej: "CQRS", "servicio", "repository")',
+          description:
+            'Término de búsqueda (ej: "CQRS", "servicio", "repository")',
         },
         category: {
           type: 'string',
@@ -76,13 +79,15 @@ const TOOLS = [
   },
   {
     name: 'get_rule',
-    description: 'Obtiene una regla específica por ID. Devuelve la regla con el prefijo "Según CodeMentor MCP"',
+    description:
+      'Obtiene una regla específica por ID. Devuelve la regla con el prefijo "Según CodeMentor MCP"',
     inputSchema: {
       type: 'object',
       properties: {
         id: {
           type: 'string',
-          description: 'ID de la regla (ej: "clean-architecture", "dependency-injection")',
+          description:
+            'ID de la regla (ej: "clean-architecture", "dependency-injection")',
         },
       },
       required: ['id'],
@@ -90,7 +95,8 @@ const TOOLS = [
   },
   {
     name: 'list_rules',
-    description: 'Lista todas las reglas disponibles. Devuelve la lista con el prefijo "Según CodeMentor MCP"',
+    description:
+      'Lista todas las reglas disponibles. Devuelve la lista con el prefijo "Según CodeMentor MCP"',
     inputSchema: {
       type: 'object',
       properties: {
@@ -130,7 +136,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
         // Auto-detect project path if not provided
         const detectedPath = projectPath || (await detectProjectPath());
-        
+
         // Auto-detect project metadata
         let projectContext = null;
         if (detectedPath) {
@@ -147,7 +153,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
             sessionId: session,
             projectPath: detectedPath,
             projectContext,
-            options: { 
+            options: {
               userId,
               autoCreateIssue: true,
               trackInteractions: true,
@@ -160,7 +166,10 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         }
 
         const data = await response.json();
-        result = formatAgentResponse(data, { projectPath: detectedPath || undefined, projectContext });
+        result = formatAgentResponse(data, {
+          projectPath: detectedPath || undefined,
+          projectContext,
+        });
         break;
       }
 
@@ -182,12 +191,12 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
       case 'get_rule': {
         const id = args?.id as string;
-        
+
         const response = await fetch(
           `http://localhost:3000/rules?id=${encodeURIComponent(id)}`,
         );
         const data = await response.json();
-        
+
         result = formatCodeMentorResponse('get', data);
         break;
       }
@@ -195,14 +204,14 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       case 'list_rules': {
         const category = args?.category as string | undefined;
         const limit = args?.limit as number | undefined;
-        
+
         const response = await fetch(
           `http://localhost:3000/rules${
             category ? `?category=${category}` : ''
           }&limit=${limit || 50}`,
         );
         const data = await response.json();
-        
+
         result = formatCodeMentorResponse('list', data);
         break;
       }
@@ -220,7 +229,8 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       ],
     };
   } catch (error) {
-    const errorMessage = error instanceof Error ? error.message : 'Error desconocido';
+    const errorMessage =
+      error instanceof Error ? error.message : 'Error desconocido';
     return {
       content: [
         {
@@ -236,9 +246,12 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 /**
  * Formatea las respuestas con el prefijo "Según CodeMentor MCP"
  */
-function formatCodeMentorResponse(type: 'search' | 'get' | 'list', data: any): string {
+function formatCodeMentorResponse(
+  type: 'search' | 'get' | 'list',
+  data: any,
+): string {
   const prefix = '🎓 **Según CodeMentor MCP**';
-  
+
   switch (type) {
     case 'search': {
       if (!data.results || data.results.length === 0) {
@@ -246,7 +259,7 @@ function formatCodeMentorResponse(type: 'search' | 'get' | 'list', data: any): s
       }
 
       let response = `${prefix}: Encontré ${data.results.length} regla(s) relevante(s):\n\n`;
-      
+
       data.results.forEach((result: any, index: number) => {
         response += `### ${index + 1}. ${result.rule.name}\n`;
         response += `**Categoría:** ${result.rule.category}\n`;
@@ -281,7 +294,7 @@ function formatCodeMentorResponse(type: 'search' | 'get' | 'list', data: any): s
       }
 
       let response = `${prefix}: Encontré ${data.rules.length} regla(s) disponible(s):\n\n`;
-      
+
       const groupedByCategory = data.rules.reduce((acc: any, rule: any) => {
         if (!acc[rule.category]) acc[rule.category] = [];
         acc[rule.category].push(rule);
@@ -316,7 +329,10 @@ function truncateContent(content: string, maxLength: number): string {
  * Formats response from agent system with routing info, issues, etc.
  * Now includes project context info
  */
-function formatAgentResponse(data: any, context?: { projectPath?: string; projectContext?: any }): string {
+function formatAgentResponse(
+  data: any,
+  context?: { projectPath?: string; projectContext?: any },
+): string {
   const { data: responseData, metadata } = data;
 
   let text = '';
@@ -421,10 +437,10 @@ function formatAgentResponse(data: any, context?: { projectPath?: string; projec
  */
 async function detectProjectPath(): Promise<string | null> {
   let currentDir = process.cwd();
-  
+
   while (currentDir !== path.parse(currentDir).root) {
     const packageJsonPath = path.join(currentDir, 'package.json');
-    
+
     try {
       await fs.access(packageJsonPath);
       return currentDir;
@@ -432,7 +448,7 @@ async function detectProjectPath(): Promise<string | null> {
       currentDir = path.dirname(currentDir);
     }
   }
-  
+
   return null;
 }
 
@@ -489,13 +505,13 @@ function detectLanguage(packageJson: any): string {
   ) {
     return 'TypeScript';
   }
-  
+
   const hasTs = packageJson.dependencies?.['typescript'];
   const hasJs = packageJson.dependencies?.['@babel/core'];
-  
+
   if (hasTs) return 'TypeScript';
   if (hasJs) return 'JavaScript';
-  
+
   return 'Unknown';
 }
 

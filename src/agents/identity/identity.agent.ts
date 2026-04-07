@@ -11,9 +11,7 @@ import { AgentLoggerService } from '@infrastructure/logging/agent-logger.service
 export class IdentityAgent extends BaseAgent {
   private readonly mcpPrefix = '🎓 **Según CodeMentor MCP**';
 
-  constructor(
-    private readonly agentLogger: AgentLoggerService,
-  ) {
+  constructor(private readonly agentLogger: AgentLoggerService) {
     super(
       'IdentityAgent',
       'Gestiona la identidad MCP y aplica formato a las respuestas',
@@ -37,9 +35,13 @@ export class IdentityAgent extends BaseAgent {
 
     // Agregar contexto de usuario si existe
     if (context.userPreferences) {
-      this.agentLogger.debug(this.agentId, 'Preferencias de usuario aplicadas', {
-        language: context.userPreferences.language,
-      });
+      this.agentLogger.debug(
+        this.agentId,
+        'Preferencias de usuario aplicadas',
+        {
+          language: context.userPreferences.language,
+        },
+      );
     }
 
     return {
@@ -86,6 +88,8 @@ export class IdentityAgent extends BaseAgent {
       'tu nombre',
     ];
 
-    return identityKeywords.some((keyword) => input.toLowerCase().includes(keyword));
+    return identityKeywords.some((keyword) =>
+      input.toLowerCase().includes(keyword),
+    );
   }
 }

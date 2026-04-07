@@ -17,7 +17,7 @@ import { AutoDetectProjectDto, CreateProjectDto } from '../dto/project.dto';
 
 /**
  * Controller para gestión de proyectos
- * 
+ *
  * Endpoints:
  * - POST /projects/auto-detect: Auto-detectar proyecto desde package.json
  * - GET /projects: Listar proyectos del usuario
@@ -33,11 +33,11 @@ export class ProjectsController {
 
   /**
    * Auto-detecta proyecto desde package.json
-   * 
+   *
    * Extrae IP del request para identificar usuario automáticamente
    * Crea usuario si no existe
    * Crea proyecto si no existe
-   * 
+   *
    * @param body - DTO con path al proyecto
    * @param req - Request para extraer IP
    * @returns Proyecto detectado/creado
@@ -50,17 +50,20 @@ export class ProjectsController {
   ) {
     // Extraer IP del request (viene del middleware ExtractIpMiddleware)
     const ipAddress = (req as any).ipAddress || '127.0.0.1';
-    
+
     // Obtener o crear usuario por IP
     const user = await this.usersService.findByIpOrCreate(ipAddress);
 
     // Detectar proyecto desde path
-    const detection = await this.projectsService.detectFromPath(body.projectPath);
+    const detection = await this.projectsService.detectFromPath(
+      body.projectPath,
+    );
 
     if (!detection) {
       return {
         success: false,
-        error: 'No se pudo detectar el proyecto. Verifica que exista package.json',
+        error:
+          'No se pudo detectar el proyecto. Verifica que exista package.json',
         ipAddress,
       };
     }
@@ -96,9 +99,9 @@ export class ProjectsController {
   async getUserProjects(@Req() req: Request) {
     const ipAddress = (req as any).ipAddress || '127.0.0.1';
     const user = await this.usersService.findByIpOrCreate(ipAddress);
-    
+
     const projects = await this.projectsService.findByUser(user.id);
-    
+
     return {
       success: true,
       data: {
@@ -113,18 +116,15 @@ export class ProjectsController {
    */
   @Post()
   @HttpCode(HttpStatus.CREATED)
-  async createProject(
-    @Body() dto: CreateProjectDto,
-    @Req() req: Request,
-  ) {
+  async createProject(@Body() dto: CreateProjectDto, @Req() req: Request) {
     const ipAddress = (req as any).ipAddress || '127.0.0.1';
     const user = await this.usersService.findByIpOrCreate(ipAddress);
-    
+
     const project = await this.projectsService.findOrCreateForUser(
       user.id,
       dto.name,
     );
-    
+
     return {
       success: true,
       data: {
@@ -140,14 +140,14 @@ export class ProjectsController {
   @HttpCode(HttpStatus.OK)
   async getProject(@Param('id') id: string) {
     const project = await this.projectsService.findById(id);
-    
+
     if (!project) {
       return {
         success: false,
         error: 'Proyecto no encontrado',
       };
     }
-    
+
     return {
       success: true,
       data: {

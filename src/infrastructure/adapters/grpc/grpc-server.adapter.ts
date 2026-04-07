@@ -57,7 +57,8 @@ export class GrpcServerAdapter implements OnModuleInit, OnModuleDestroy {
     const agentSkillPackage = protoDescriptor.agent_skill as grpc.GrpcObject;
 
     this.server.addService(
-      (agentSkillPackage.AgentSkillService as grpc.ServiceClientConstructor).service,
+      (agentSkillPackage.AgentSkillService as grpc.ServiceClientConstructor)
+        .service,
       {
         searchRules: this.searchRules.bind(this),
         searchRulesStream: this.searchRulesStream.bind(this),

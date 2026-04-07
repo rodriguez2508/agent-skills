@@ -6,7 +6,7 @@ import * as crypto from 'crypto';
 
 /**
  * Servicio de usuarios para gestión de identidad
- * 
+ *
  * Características:
  * - Identificación automática por IP para desarrollo local
  * - Hash de IP para privacidad en producción
@@ -21,17 +21,17 @@ export class UsersService {
 
   /**
    * Encuentra usuario por IP o crea uno nuevo
-   * 
+   *
    * Para desarrollo: usa IP directa como identificador
    * Para producción: usa hash de IP con salt para privacidad
-   * 
+   *
    * @param ipAddress - Dirección IP del cliente
    * @returns Usuario encontrado o creado
    */
   async findByIpOrCreate(ipAddress: string): Promise<User> {
     // Hash de IP para privacidad (producción)
     const hashedIp = this.hashIpAddress(ipAddress);
-    
+
     // Intentar buscar por IP directa (desarrollo) o hash (producción)
     let user = await this.userRepository.findOne({
       where: [{ lastIpAddress: ipAddress }],
@@ -62,18 +62,15 @@ export class UsersService {
 
   /**
    * Hash de IP para privacidad en producción
-   * 
+   *
    * Usa HMAC-SHA256 con salt configurable
-   * 
+   *
    * @param ipAddress - IP a hashear
    * @returns Hash hex string
    */
   private hashIpAddress(ipAddress: string): string {
     const salt = process.env.IP_HASH_SALT || 'default-salt-change-in-prod';
-    return crypto
-      .createHmac('sha256', salt)
-      .update(ipAddress)
-      .digest('hex');
+    return crypto.createHmac('sha256', salt).update(ipAddress).digest('hex');
   }
 
   /**

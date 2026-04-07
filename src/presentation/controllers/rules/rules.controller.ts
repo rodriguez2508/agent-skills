@@ -1,11 +1,22 @@
-import { Controller, Get, Post, Body, Query, BadRequestException, Logger } from '@nestjs/common';
+import {
+  Controller,
+  Get,
+  Post,
+  Body,
+  Query,
+  BadRequestException,
+  Logger,
+} from '@nestjs/common';
 import { QueryBus } from '@nestjs/cqrs';
 import { ApiTags, ApiOperation, ApiOkResponse } from '@nestjs/swagger';
 import { SearchRulesQuery } from '@application/queries/search-rules/search-rules.query';
 import { GetRuleQuery } from '@application/queries/get-rule/get-rule.query';
 import { ListRulesQuery } from '@application/queries/list-rules/list-rules.query';
 import { SearchRulesDto } from '@presentation/dto/search-rules.dto';
-import { RuleResponseDto, RuleResultDto } from '@presentation/dto/rule-response.dto';
+import {
+  RuleResponseDto,
+  RuleResultDto,
+} from '@presentation/dto/rule-response.dto';
 import { RulesEngine } from '@infrastructure/rules/rules-engine';
 
 @ApiTags('Rules')
@@ -108,18 +119,18 @@ export class RulesController {
   })
   async reloadRules() {
     this.logger.log('🔄 Reloading rules from filesystem...');
-    
+
     // Reload rules from filesystem
     await this.rulesEngine.loadRules();
-    
+
     const allRules = this.rulesEngine.getAllRules();
-    
+
     this.logger.log(`✅ Rules reloaded: ${allRules.length} rules`);
-    
+
     return {
       message: `Rules reloaded successfully: ${allRules.length} rules`,
       count: allRules.length,
-      rules: allRules.map(r => `${r.id} (${r.category})`),
+      rules: allRules.map((r) => `${r.id} (${r.category})`),
     };
   }
 }

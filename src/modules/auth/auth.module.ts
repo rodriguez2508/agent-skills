@@ -17,12 +17,7 @@ import { EmailService } from './infrastructure/services/email.service';
 @Module({
   imports: [UsersModule, SessionsModule],
   controllers: [AuthController],
-  providers: [
-    AuthService,
-    PasswordHashService,
-    TokenService,
-    EmailService,
-  ],
+  providers: [AuthService, PasswordHashService, TokenService, EmailService],
   exports: [AuthService],
 })
 export class AuthModule {}

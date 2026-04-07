@@ -22,7 +22,7 @@ import { UsersService } from '@modules/users/application/services/users.service'
 
 /**
  * Controller para gestión de issues con contexto
- * 
+ *
  * Endpoints:
  * - POST /issues: Crear issue
  * - GET /issues/:id: Obtener issue con contexto
@@ -44,13 +44,10 @@ export class IssuesController {
    */
   @Post()
   @HttpCode(HttpStatus.CREATED)
-  async createIssue(
-    @Body() dto: CreateIssueDto,
-    @Req() req: Request,
-  ) {
+  async createIssue(@Body() dto: CreateIssueDto, @Req() req: Request) {
     // Obtener IP para identificar usuario si no se proporciona userId
     const ipAddress = (req as any).ipAddress || '127.0.0.1';
-    
+
     let userId = dto.userId;
     if (!userId) {
       const user = await this.usersService.findByIpOrCreate(ipAddress);

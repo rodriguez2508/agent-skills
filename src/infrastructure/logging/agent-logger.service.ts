@@ -110,8 +110,14 @@ export class AgentLoggerService {
   /**
    * Obtiene estadísticas de logs por agente
    */
-  getAgentStats(): Record<string, { total: number; errors: number; warnings: number }> {
-    const stats: Record<string, { total: number; errors: number; warnings: number }> = {};
+  getAgentStats(): Record<
+    string,
+    { total: number; errors: number; warnings: number }
+  > {
+    const stats: Record<
+      string,
+      { total: number; errors: number; warnings: number }
+    > = {};
 
     for (const log of this.logs) {
       if (!stats[log.agentId]) {
@@ -143,7 +149,7 @@ export class AgentLoggerService {
   private printLog(entry: AgentLogEntry): void {
     const emoji = this.getEmojiForLevel(entry.level);
     const timestamp = entry.timestamp.toISOString();
-    
+
     console.log(
       `[${timestamp}] ${emoji} [${entry.agentId}] ${entry.message}`,
       entry.context ? JSON.stringify(entry.context) : '',

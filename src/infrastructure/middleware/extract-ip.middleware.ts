@@ -3,12 +3,12 @@ import { Request, Response, NextFunction } from 'express';
 
 /**
  * Middleware para extraer la dirección IP real del cliente
- * 
+ *
  * Soporta:
  * - Headers de proxy (X-Forwarded-For, X-Real-IP)
  * - IPv4 e IPv6
  * - Remoción de prefijo IPv6 (::ffff:)
- * 
+ *
  * Adjunta la IP al request como:
  * - req.ipAddress - IP limpia
  * - req.userId - Usado como identificador temporal de usuario
@@ -19,9 +19,9 @@ export class ExtractIpMiddleware implements NestMiddleware {
     // Extraer IP real (considerando proxies y load balancers)
     const forwardedFor = req.headers['x-forwarded-for'] as string;
     const realIp = req.headers['x-real-ip'] as string;
-    
+
     let ipAddress: string;
-    
+
     if (forwardedFor) {
       // x-forwarded-for puede tener múltiples IPs: client, proxy1, proxy2
       // Tomar la primera (cliente original)
@@ -39,7 +39,7 @@ export class ExtractIpMiddleware implements NestMiddleware {
 
     // Adjuntar al request para uso posterior
     (req as any).ipAddress = ipAddress;
-    
+
     // Usar IP como userId temporal para auto-identificación
     (req as any).userId = ipAddress;
 

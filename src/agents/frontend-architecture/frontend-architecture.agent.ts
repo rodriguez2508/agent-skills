@@ -6,7 +6,7 @@ import { AgentLoggerService } from '@infrastructure/logging/agent-logger.service
 
 /**
  * FrontendArchitectureAgent
- * 
+ *
  * Valida que un proyecto frontend Angular cumpla con:
  * - Clean Architecture (domain/application/infrastructure)
  * - CQRS (commands/queries/facade)
@@ -28,7 +28,7 @@ export class FrontendArchitectureAgent extends BaseAgent {
 
   protected async handle(request: AgentRequest): Promise<AgentResponse> {
     const startTime = Date.now();
-    
+
     this.agentLogger.info(
       this.agentId,
       '🏗️ [FrontendArch] Starting architecture validation',
@@ -43,7 +43,8 @@ export class FrontendArchitectureAgent extends BaseAgent {
 
     try {
       // Validar proyecto Angular
-      const validationResult = await this.validationService.validateAngularProject(projectPath);
+      const validationResult =
+        await this.validationService.validateAngularProject(projectPath);
 
       const executionTime = Date.now() - startTime;
 
@@ -52,7 +53,9 @@ export class FrontendArchitectureAgent extends BaseAgent {
 
       this.agentLogger.info(
         this.agentId,
-        validationResult.passed ? '✅ Validation passed' : '❌ Validation failed',
+        validationResult.passed
+          ? '✅ Validation passed'
+          : '❌ Validation failed',
         {
           totalFeatures: validationResult.summary.totalFeatures,
           passedFeatures: validationResult.summary.passedFeatures,
@@ -78,7 +81,7 @@ export class FrontendArchitectureAgent extends BaseAgent {
       };
     } catch (error) {
       const executionTime = Date.now() - startTime;
-      
+
       this.agentLogger.error(
         this.agentId,
         `Validation failed: ${error.message}`,

@@ -8,7 +8,10 @@ import { Injectable, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, LessThanOrEqual } from 'typeorm';
 import { Session, SessionStatus } from '../../domain/entities/session.entity';
-import { ChatMessage, MessageRole } from '../../domain/entities/chat-message.entity';
+import {
+  ChatMessage,
+  MessageRole,
+} from '../../domain/entities/chat-message.entity';
 import {
   ISessionRepository,
   CreateSessionDto,
@@ -91,8 +94,8 @@ export class SessionRepository implements ISessionRepository {
    */
   async findValidatedSessionByUserId(userId: string): Promise<Session | null> {
     return this.repository.findOne({
-      where: { 
-        userId, 
+      where: {
+        userId,
         status: SessionStatus.ACTIVE,
         isValidated: true,
       },
@@ -157,7 +160,9 @@ export class SessionRepository implements ISessionRepository {
 
     // Check if session is still active
     if (session.status !== SessionStatus.ACTIVE) {
-      throw new Error(`Session is not active: ${data.sessionId} (status: ${session.status})`);
+      throw new Error(
+        `Session is not active: ${data.sessionId} (status: ${session.status})`,
+      );
     }
 
     const message = this.messageRepository.create({
@@ -185,7 +190,7 @@ export class SessionRepository implements ISessionRepository {
       session.validatedAt = new Date();
       this.logger.debug(`✅ Session validated: ${session.id}`);
     }
-    
+
     await this.repository.save(session);
 
     this.logger.debug(`💬 Message added to session ${session.id}`);
@@ -195,7 +200,10 @@ export class SessionRepository implements ISessionRepository {
   /**
    * Update session status
    */
-  async updateStatus(sessionId: string, status: SessionStatus): Promise<Session> {
+  async updateStatus(
+    sessionId: string,
+    status: SessionStatus,
+  ): Promise<Session> {
     await this.repository.update({ sessionId }, { status });
     const updated = await this.findBySessionId(sessionId);
 
@@ -220,9 +228,10 @@ export class SessionRepository implements ISessionRepository {
   async invalidate(sessionId: string, reason?: string): Promise<Session> {
     await this.repository.update(
       { sessionId },
-      { 
+      {
         status: SessionStatus.INVALID,
-        metadata: () => `metadata || '{}'::jsonb || '{"invalidReason": "${reason || "No reason provided"}"}'::jsonb`,
+        metadata: () =>
+          `metadata || '{}'::jsonb || '{"invalidReason": "${reason || 'No reason provided'}"}'::jsonb`,
       },
     );
     const updated = await this.findBySessionId(sessionId);
@@ -231,7 +240,9 @@ export class SessionRepository implements ISessionRepository {
       throw new Error(`Session not found: ${sessionId}`);
     }
 
-    this.logger.warn(`🚫 Session invalidated: ${sessionId}${reason ? ` - ${reason}` : ''}`);
+    this.logger.warn(
+      `🚫 Session invalidated: ${sessionId}${reason ? ` - ${reason}` : ''}`,
+    );
     return updated;
   }
 
@@ -258,7 +269,9 @@ export class SessionRepository implements ISessionRepository {
    */
   async getActiveSessions(userId?: string): Promise<Session[]> {
     return this.repository.find({
-      where: userId ? { userId, status: SessionStatus.ACTIVE } : { status: SessionStatus.ACTIVE },
+      where: userId
+        ? { userId, status: SessionStatus.ACTIVE }
+        : { status: SessionStatus.ACTIVE },
       order: { createdAt: 'DESC' },
       take: 50,
       relations: ['user'],
@@ -270,7 +283,7 @@ export class SessionRepository implements ISessionRepository {
    */
   async getValidatedActiveSessions(userId?: string): Promise<Session[]> {
     return this.repository.find({
-      where: userId 
+      where: userId
         ? { userId, status: SessionStatus.ACTIVE, isValidated: true }
         : { status: SessionStatus.ACTIVE, isValidated: true },
       order: { lastActivityAt: 'DESC' },

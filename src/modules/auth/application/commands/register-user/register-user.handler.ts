@@ -15,7 +15,10 @@ export interface RegisterUserResult {
 }
 
 @CommandHandler(RegisterUserCommand)
-export class RegisterUserHandler implements ICommandHandler<RegisterUserCommand, RegisterUserResult> {
+export class RegisterUserHandler implements ICommandHandler<
+  RegisterUserCommand,
+  RegisterUserResult
+> {
   private readonly logger = new Logger(RegisterUserHandler.name);
 
   constructor(

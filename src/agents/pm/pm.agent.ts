@@ -31,7 +31,7 @@ export class PMAgent extends BaseAgent {
    */
   protected async handle(request: AgentRequest): Promise<AgentResponse> {
     const input = request.input;
-    const context = request.options?.context as any;
+    const context = request.options?.context;
 
     this.agentLogger.info(this.agentId, '📋 [PM] Processing product request', {
       input: input.substring(0, 100),
@@ -62,31 +62,52 @@ export class PMAgent extends BaseAgent {
     const lowerInput = input.toLowerCase();
 
     // Creating issues/tickets
-    if (this.matchesPattern(lowerInput, [
-      'crear issue', 'crear ticket', 'create issue', 'create ticket',
-      'necesito un issue', 'need an issue', 'abrir issue', 'open issue'
-    ])) {
+    if (
+      this.matchesPattern(lowerInput, [
+        'crear issue',
+        'crear ticket',
+        'create issue',
+        'create ticket',
+        'necesito un issue',
+        'need an issue',
+        'abrir issue',
+        'open issue',
+      ])
+    ) {
       return 'CREATE_ISSUE';
     }
 
     // User stories
-    if (this.matchesPattern(lowerInput, [
-      'historia de usuario', 'user story', 'como usuario', 'as a user'
-    ])) {
+    if (
+      this.matchesPattern(lowerInput, [
+        'historia de usuario',
+        'user story',
+        'como usuario',
+        'as a user',
+      ])
+    ) {
       return 'USER_STORY';
     }
 
     // Acceptance criteria
-    if (this.matchesPattern(lowerInput, [
-      'criterios de aceptación', 'acceptance criteria', 'definition of done'
-    ])) {
+    if (
+      this.matchesPattern(lowerInput, [
+        'criterios de aceptación',
+        'acceptance criteria',
+        'definition of done',
+      ])
+    ) {
       return 'ACCEPTANCE_CRITERIA';
     }
 
     // Product Requirements Document
-    if (this.matchesPattern(lowerInput, [
-      'prd', 'product requirements', 'documento de producto'
-    ])) {
+    if (
+      this.matchesPattern(lowerInput, [
+        'prd',
+        'product requirements',
+        'documento de producto',
+      ])
+    ) {
       return 'PRD';
     }
 
@@ -98,9 +119,11 @@ export class PMAgent extends BaseAgent {
    * Focus: Business value, user problem, success metrics
    * ALSO creates issue in database for tracking
    */
-  private async createProductIssue(request: AgentRequest): Promise<AgentResponse> {
+  private async createProductIssue(
+    request: AgentRequest,
+  ): Promise<AgentResponse> {
     const input = request.input;
-    const context = request.options?.context as any || {};
+    const context = request.options?.context || {};
     const userId = request.options?.userId as string;
     const sessionId = request.options?.sessionId as string;
 
@@ -130,7 +153,10 @@ export class PMAgent extends BaseAgent {
           },
         });
       } catch (error) {
-        this.agentLogger.warn(this.agentId, `Failed to create issue in DB: ${error.message}`);
+        this.agentLogger.warn(
+          this.agentId,
+          `Failed to create issue in DB: ${error.message}`,
+        );
       }
     }
 
@@ -146,7 +172,8 @@ export class PMAgent extends BaseAgent {
           id: issueData.id || null,
           issueId: issueData.issueId || null,
         },
-        warning: '⚠️ Este issue NO incluye detalles técnicos de implementación. Eso lo define el equipo de desarrollo.',
+        warning:
+          '⚠️ Este issue NO incluye detalles técnicos de implementación. Eso lo define el equipo de desarrollo.',
         nextSteps: [
           'Revisar issue con stakeholders',
           'Priorizar en backlog',
@@ -188,7 +215,9 @@ export class PMAgent extends BaseAgent {
   /**
    * Creates acceptance criteria
    */
-  private async createAcceptanceCriteria(request: AgentRequest): Promise<AgentResponse> {
+  private async createAcceptanceCriteria(
+    request: AgentRequest,
+  ): Promise<AgentResponse> {
     const input = request.input;
 
     const criteria = this.generateAcceptanceCriteria(input);
@@ -226,7 +255,9 @@ export class PMAgent extends BaseAgent {
   /**
    * Provides PM guidance
    */
-  private async providePMGuidance(request: AgentRequest): Promise<AgentResponse> {
+  private async providePMGuidance(
+    request: AgentRequest,
+  ): Promise<AgentResponse> {
     return {
       success: true,
       data: {
@@ -240,7 +271,8 @@ export class PMAgent extends BaseAgent {
         ],
         example: {
           userSays: 'Necesito un issue para autenticación con Google',
-          pmResponse: 'Issue: "Como usuario, quiero iniciar sesión con Google para acceder más rápido sin crear nueva cuenta"',
+          pmResponse:
+            'Issue: "Como usuario, quiero iniciar sesión con Google para acceder más rápido sin crear nueva cuenta"',
           not: 'Issue técnico: "Implementar OAuth2 con Google API usando passport-google-oauth20"',
         },
       },
@@ -257,7 +289,8 @@ export class PMAgent extends BaseAgent {
       businessGoal: this.identifyBusinessGoal(input, context),
       targetUsers: context.targetUsers || 'Usuarios de la plataforma',
       currentPainPoint: context.currentPainPoint || 'No especificado',
-      expectedOutcome: context.expectedOutcome || 'Mejora en la experiencia del usuario',
+      expectedOutcome:
+        context.expectedOutcome || 'Mejora en la experiencia del usuario',
     };
   }
 
@@ -312,7 +345,8 @@ ${context.expectedOutcome}`,
         '❌ Tecnologías específicas a usar',
       ],
 
-      notes: '⚠️ El equipo de desarrollo definirá la solución técnica durante el sprint planning.',
+      notes:
+        '⚠️ El equipo de desarrollo definirá la solución técnica durante el sprint planning.',
     };
   }
 
@@ -372,27 +406,37 @@ ${context.expectedOutcome}`,
   }
 
   private identifyBusinessGoal(input: string, context: any): string {
-    return context.businessGoal || 'Mejorar la experiencia del usuario y aumentar la adopción';
+    return (
+      context.businessGoal ||
+      'Mejorar la experiencia del usuario y aumentar la adopción'
+    );
   }
 
   private identifyUserRole(input: string): string {
     if (input.toLowerCase().includes('admin')) return 'administrador';
-    if (input.toLowerCase().includes('cliente') || input.toLowerCase().includes('customer')) return 'cliente';
+    if (
+      input.toLowerCase().includes('cliente') ||
+      input.toLowerCase().includes('customer')
+    )
+      return 'cliente';
     return 'usuario';
   }
 
   private identifyUserGoal(input: string): string {
     // Extract the goal from the input
-    return input.toLowerCase().replace(/(crear|implementar|agregar|necesito|quiero)/gi, '').trim();
+    return input
+      .toLowerCase()
+      .replace(/(crear|implementar|agregar|necesito|quiero)/gi, '')
+      .trim();
   }
 
   private identifyUserBenefit(input: string): string {
     const benefits: Record<string, string> = {
-      'auth': 'acceder de forma segura y rápida',
-      'login': 'iniciar sesión fácilmente',
-      'search': 'encontrar lo que busco rápidamente',
-      'report': 'tener visibilidad del estado',
-      'export': 'poder usar los datos en otras herramientas',
+      auth: 'acceder de forma segura y rápida',
+      login: 'iniciar sesión fácilmente',
+      search: 'encontrar lo que busco rápidamente',
+      report: 'tener visibilidad del estado',
+      export: 'poder usar los datos en otras herramientas',
     };
 
     for (const [key, benefit] of Object.entries(benefits)) {
@@ -419,8 +463,8 @@ ${context.expectedOutcome}`,
 
     const lowerInput = input.toLowerCase();
 
-    if (highValue.some(k => lowerInput.includes(k))) return '🔴 HIGH';
-    if (mediumValue.some(k => lowerInput.includes(k))) return '🟡 MEDIUM';
+    if (highValue.some((k) => lowerInput.includes(k))) return '🔴 HIGH';
+    if (mediumValue.some((k) => lowerInput.includes(k))) return '🟡 MEDIUM';
     return '🟢 LOW';
   }
 
@@ -430,21 +474,30 @@ ${context.expectedOutcome}`,
 
     const lowerInput = input.toLowerCase();
 
-    if (urgent.some(k => lowerInput.includes(k))) return '🔴 URGENT';
-    if (high.some(k => lowerInput.includes(k))) return '🟠 HIGH';
+    if (urgent.some((k) => lowerInput.includes(k))) return '🔴 URGENT';
+    if (high.some((k) => lowerInput.includes(k))) return '🟠 HIGH';
     return '🟡 MEDIUM';
   }
 
   private generateLabels(input: string): string[] {
     const labels: string[] = ['feature'];
 
-    if (input.toLowerCase().includes('auth') || input.toLowerCase().includes('login')) {
+    if (
+      input.toLowerCase().includes('auth') ||
+      input.toLowerCase().includes('login')
+    ) {
       labels.push('authentication');
     }
-    if (input.toLowerCase().includes('report') || input.toLowerCase().includes('analytics')) {
+    if (
+      input.toLowerCase().includes('report') ||
+      input.toLowerCase().includes('analytics')
+    ) {
       labels.push('analytics');
     }
-    if (input.toLowerCase().includes('ui') || input.toLowerCase().includes('design')) {
+    if (
+      input.toLowerCase().includes('ui') ||
+      input.toLowerCase().includes('design')
+    ) {
       labels.push('ux/ui');
     }
 
@@ -454,14 +507,14 @@ ${context.expectedOutcome}`,
   private generatePMTitle(feature: string): string {
     // Convert technical feature to business-friendly title
     const titleMap: Record<string, string> = {
-      'auth': 'Autenticación de Usuarios',
-      'login': 'Inicio de Sesión',
-      'oauth': 'Login con Redes Sociales',
-      'jwt': 'Sistema de Autenticación',
-      'search': 'Búsqueda en la Plataforma',
-      'report': 'Reportes y Analytics',
-      'export': 'Exportación de Datos',
-      'dashboard': 'Dashboard Principal',
+      auth: 'Autenticación de Usuarios',
+      login: 'Inicio de Sesión',
+      oauth: 'Login con Redes Sociales',
+      jwt: 'Sistema de Autenticación',
+      search: 'Búsqueda en la Plataforma',
+      report: 'Reportes y Analytics',
+      export: 'Exportación de Datos',
+      dashboard: 'Dashboard Principal',
     };
 
     for (const [key, title] of Object.entries(titleMap)) {
@@ -481,10 +534,26 @@ ${context.expectedOutcome}`,
    */
   canHandle(input: string): boolean {
     const pmKeywords = [
-      'issue', 'ticket', 'historia', 'story', 'producto', 'product',
-      'requerimiento', 'requirement', 'prd', 'feature', 'funcionalidad',
-      'criterio', 'criteria', 'acceptance', 'usuario', 'user story',
-      'como usuario', 'as a user', 'valor de negocio', 'business value',
+      'issue',
+      'ticket',
+      'historia',
+      'story',
+      'producto',
+      'product',
+      'requerimiento',
+      'requirement',
+      'prd',
+      'feature',
+      'funcionalidad',
+      'criterio',
+      'criteria',
+      'acceptance',
+      'usuario',
+      'user story',
+      'como usuario',
+      'as a user',
+      'valor de negocio',
+      'business value',
     ];
 
     return pmKeywords.some((keyword) => input.toLowerCase().includes(keyword));

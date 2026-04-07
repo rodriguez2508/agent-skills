@@ -36,7 +36,9 @@ export class AddIpAddressToUsers1711152000002 implements MigrationInterface {
       ON "users" ("lastIpAddress")
     `);
 
-    console.log('✅ Migration applied: Added IP address tracking to users table');
+    console.log(
+      '✅ Migration applied: Added IP address tracking to users table',
+    );
   }
 
   public async down(queryRunner: QueryRunner): Promise<void> {
@@ -49,6 +51,8 @@ export class AddIpAddressToUsers1711152000002 implements MigrationInterface {
     await queryRunner.dropColumn('users', 'ipAddressHistory');
     await queryRunner.dropColumn('users', 'lastIpAddress');
 
-    console.log('❌ Migration reverted: Removed IP address tracking from users table');
+    console.log(
+      '❌ Migration reverted: Removed IP address tracking from users table',
+    );
   }
 }

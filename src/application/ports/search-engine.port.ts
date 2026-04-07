@@ -8,7 +8,11 @@ export interface SearchResult {
 export interface SearchEngine {
   index(rule: Rule): void;
   search(query: string, limit?: number): SearchResult[];
-  searchByCategory(query: string, category: string, limit?: number): SearchResult[];
+  searchByCategory(
+    query: string,
+    category: string,
+    limit?: number,
+  ): SearchResult[];
   remove(ruleId: string): void;
   clear(): void;
 }

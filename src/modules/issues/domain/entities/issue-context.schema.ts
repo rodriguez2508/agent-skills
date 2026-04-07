@@ -1,9 +1,9 @@
 /**
  * Schema completo para el contexto de issues
- * 
+ *
  * Almacena toda la interacción usuario-agente durante el ciclo de vida de un issue.
  * Permite trazar decisiones, archivos modificados y evolución del trabajo.
- * 
+ *
  * @see https://github.com/aajcr/agent-skills-api/blob/main/doc/BUSINESS-IDEA.md
  */
 
@@ -47,23 +47,23 @@ export interface Interaction {
    * Ejemplo: "2026-03-28T10:00:00Z"
    */
   timestamp: string;
-  
+
   /**
    * Rol del participante
    */
   role: 'user' | 'agent' | 'system';
-  
+
   /**
    * Contenido del mensaje
    */
   content: string;
-  
+
   /**
    * ID del agente (si role === 'agent')
    * Ejemplo: "AnalysisAgent", "CodeAgent", "PMAgent"
    */
   agentId?: string;
-  
+
   /**
    * Metadata de la interacción
    */
@@ -79,32 +79,32 @@ export interface InteractionMetadata {
    * Ejemplo: "analysis", "code", "pm", "issue-workflow"
    */
   intention?: string;
-  
+
   /**
    * Agentes invocados para esta interacción
    */
   agentsInvoked?: string[];
-  
+
   /**
    * Reglas de código aplicadas
    */
   rulesApplied?: string[];
-  
+
   /**
    * Tiempo de ejecución en milisegundos
    */
   executionTime?: number;
-  
+
   /**
    * Errores si los hubo
    */
   errors?: string[];
-  
+
   /**
    * Path del proyecto (si aplica)
    */
   projectPath?: string;
-  
+
   /**
    * ID del issue (si se creó/actualizó)
    */
@@ -119,37 +119,53 @@ export interface ProjectSnapshot {
    * Nombre del proyecto (del package.json)
    */
   name: string;
-  
+
   /**
    * Versión del proyecto (del package.json)
    */
   version?: string;
-  
+
   /**
    * Dependencias principales
    */
   dependencies: Record<string, string>;
-  
+
   /**
    * Dev dependencies
    */
   devDependencies?: Record<string, string>;
-  
+
   /**
    * Scripts disponibles
    */
   scripts?: Record<string, string>;
-  
+
   /**
    * Framework detectado
    */
-  detectedFramework?: 'angular' | 'nestjs' | 'react' | 'vue' | 'nextjs' | 'nuxtjs' | 'svelte' | 'node-express' | 'node-fastify' | 'node';
-  
+  detectedFramework?:
+    | 'angular'
+    | 'nestjs'
+    | 'react'
+    | 'vue'
+    | 'nextjs'
+    | 'nuxtjs'
+    | 'svelte'
+    | 'node-express'
+    | 'node-fastify'
+    | 'node';
+
   /**
    * Arquitectura detectada
    */
-  detectedArchitecture?: 'hexagonal' | 'clean' | 'nestjs' | 'angular' | 'standard' | 'unknown';
-  
+  detectedArchitecture?:
+    | 'hexagonal'
+    | 'clean'
+    | 'nestjs'
+    | 'angular'
+    | 'standard'
+    | 'unknown';
+
   /**
    * Lenguaje principal
    */
@@ -164,22 +180,22 @@ export interface KeyDecision {
    * Decisión tomada
    */
   decision: string;
-  
+
   /**
    * Razonamiento detrás de la decisión
    */
   rationale: string;
-  
+
   /**
    * Timestamp de la decisión
    */
   timestamp: string;
-  
+
   /**
    * Alternativas consideradas
    */
   alternatives?: string[];
-  
+
   /**
    * Agente que tomó la decisión
    */
@@ -195,27 +211,27 @@ export interface FileModification {
    * Ejemplo: "src/users/users.service.ts"
    */
   path: string;
-  
+
   /**
    * Acción realizada
    */
   action: 'create' | 'modify' | 'delete';
-  
+
   /**
    * Líneas añadidas
    */
   linesAdded?: number;
-  
+
   /**
    * Líneas removidas
    */
   linesRemoved?: number;
-  
+
   /**
    * Diff (opcional, puede ser grande)
    */
   diff?: string;
-  
+
   /**
    * Timestamp de la modificación
    */

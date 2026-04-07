@@ -40,13 +40,17 @@ export class AddTotalSessionsAndSearchesToUsers1711152000003 implements Migratio
       );
     }
 
-    console.log('✅ Migration applied: Added totalSessions and totalSearches to users table');
+    console.log(
+      '✅ Migration applied: Added totalSessions and totalSearches to users table',
+    );
   }
 
   public async down(queryRunner: QueryRunner): Promise<void> {
     await queryRunner.dropColumn('users', 'totalSearches');
     await queryRunner.dropColumn('users', 'totalSessions');
-    
-    console.log('❌ Migration reverted: Removed totalSessions and totalSearches from users table');
+
+    console.log(
+      '❌ Migration reverted: Removed totalSessions and totalSearches from users table',
+    );
   }
 }

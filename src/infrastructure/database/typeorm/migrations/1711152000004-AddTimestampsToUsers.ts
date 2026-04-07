@@ -40,13 +40,17 @@ export class AddTimestampsToUsers1711152000004 implements MigrationInterface {
       );
     }
 
-    console.log('✅ Migration applied: Added created_at and updated_at to users table');
+    console.log(
+      '✅ Migration applied: Added created_at and updated_at to users table',
+    );
   }
 
   public async down(queryRunner: QueryRunner): Promise<void> {
     await queryRunner.dropColumn('users', 'updated_at');
     await queryRunner.dropColumn('users', 'created_at');
-    
-    console.log('❌ Migration reverted: Removed created_at and updated_at from users table');
+
+    console.log(
+      '❌ Migration reverted: Removed created_at and updated_at from users table',
+    );
   }
 }

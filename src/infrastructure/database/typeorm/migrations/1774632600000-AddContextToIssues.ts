@@ -2,7 +2,7 @@ import { MigrationInterface, QueryRunner } from 'typeorm';
 
 /**
  * Migration: Add context column to issues table
- * 
+ *
  * Adds JSONB column for storing complete interaction context
  */
 export class AddContextToIssues1774632600000 implements MigrationInterface {

@@ -41,7 +41,7 @@ export class RulesEngine implements OnModuleInit {
     try {
       // Clear existing rules cache
       this.rules.clear();
-      
+
       const allRules = await this.ruleRepository.findAll();
 
       for (const rule of allRules) {
@@ -57,7 +57,9 @@ export class RulesEngine implements OnModuleInit {
         this.logger.debug(`📄 Loaded rule: ${rule.name}`);
       }
 
-      this.logger.log(`📚 Loaded ${this.rules.size} rules from RuleFileRepository`);
+      this.logger.log(
+        `📚 Loaded ${this.rules.size} rules from RuleFileRepository`,
+      );
     } catch (error) {
       this.logger.error(`Failed to load rules: ${error.message}`);
     }
@@ -73,7 +75,9 @@ export class RulesEngine implements OnModuleInit {
     for (const rule of this.rules.values()) {
       const titleMatch = rule.title.toLowerCase().includes(contextLower);
       const contentMatch = rule.content.toLowerCase().includes(contextLower);
-      const tagsMatch = rule.tags.some((tag) => tag.toLowerCase().includes(contextLower));
+      const tagsMatch = rule.tags.some((tag) =>
+        tag.toLowerCase().includes(contextLower),
+      );
 
       if (titleMatch || contentMatch || tagsMatch) {
         relevantRules.push(rule);
@@ -118,8 +122,11 @@ export class RulesEngine implements OnModuleInit {
       return response;
     }
 
-    const rulesSection = '\n\n📋 **Relevant Rules Applied:**\n' +
-      relevantRules.map((rule) => `- ${rule.title} (${rule.impact})`).join('\n');
+    const rulesSection =
+      '\n\n📋 **Relevant Rules Applied:**\n' +
+      relevantRules
+        .map((rule) => `- ${rule.title} (${rule.impact})`)
+        .join('\n');
 
     return response + rulesSection;
   }

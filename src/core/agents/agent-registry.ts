@@ -15,11 +15,15 @@ export class AgentRegistry {
    */
   register(agent: IAgent): void {
     if (this.agents.has(agent.agentId)) {
-      this.logger.warn(`⚠️ Agente "${agent.agentId}" ya está registrado, se va a sobrescribir`);
+      this.logger.warn(
+        `⚠️ Agente "${agent.agentId}" ya está registrado, se va a sobrescribir`,
+      );
     }
-    
+
     this.agents.set(agent.agentId, agent);
-    this.logger.log(`✅ Agente registrado: ${agent.agentId} - ${agent.description}`);
+    this.logger.log(
+      `✅ Agente registrado: ${agent.agentId} - ${agent.description}`,
+    );
   }
 
   /**

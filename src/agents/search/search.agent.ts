@@ -1,7 +1,10 @@
 import { Injectable, Inject } from '@nestjs/common';
 import { BaseAgent } from '@core/agents/base.agent';
 import { AgentRequest } from '@core/agents/agent-response';
-import { RULE_REPOSITORY, RuleRepository } from '@core/domain/ports/rule-repository.token';
+import {
+  RULE_REPOSITORY,
+  RuleRepository,
+} from '@core/domain/ports/rule-repository.token';
 import { BM25Engine } from '@infrastructure/search/bm25/bm25.engine';
 import { AgentLoggerService } from '@infrastructure/logging/agent-logger.service';
 import { RulesEngine } from '@infrastructure/rules/rules-engine';
@@ -28,10 +31,7 @@ export class SearchAgent extends BaseAgent {
     private readonly vectorStoreFactory: VectorStoreFactory,
     private readonly embeddingService: EmbeddingService,
   ) {
-    super(
-      'SearchAgent',
-      'Searches code rules using BM25 + Vector Search',
-    );
+    super('SearchAgent', 'Searches code rules using BM25 + Vector Search');
   }
 
   /**
@@ -40,10 +40,18 @@ export class SearchAgent extends BaseAgent {
   private async initVectorStore(): Promise<IVectorStore> {
     if (!this.vectorStore) {
       try {
-        this.vectorStore = await this.vectorStoreFactory.create({ type: 'inmemory' });
-        this.agentLogger.info(this.agentId, '🧠 [SEARCH] Vector store initialized (InMemory)');
+        this.vectorStore = await this.vectorStoreFactory.create({
+          type: 'inmemory',
+        });
+        this.agentLogger.info(
+          this.agentId,
+          '🧠 [SEARCH] Vector store initialized (InMemory)',
+        );
       } catch (error) {
-        this.agentLogger.warn(this.agentId, '⚠️ [SEARCH] Vector store initialization failed, using BM25 only');
+        this.agentLogger.warn(
+          this.agentId,
+          '⚠️ [SEARCH] Vector store initialization failed, using BM25 only',
+        );
       }
     }
     return this.vectorStore!;
@@ -59,12 +67,15 @@ export class SearchAgent extends BaseAgent {
         ? await this.ruleRepository.findByCategory(category)
         : await this.ruleRepository.findAll();
 
-      this.agentLogger.debug(this.agentId, `📚 [SEARCH] Indexing ${rules.length} rules for vector search...`);
+      this.agentLogger.debug(
+        this.agentId,
+        `📚 [SEARCH] Indexing ${rules.length} rules for vector search...`,
+      );
 
       for (const rule of rules) {
         // Generate embedding for rule content
         const embedding = await this.embeddingService.generate(
-          `${rule.name} ${rule.content} ${rule.tags.join(' ')}`
+          `${rule.name} ${rule.content} ${rule.tags.join(' ')}`,
         );
 
         // Store in vector store
@@ -82,9 +93,15 @@ export class SearchAgent extends BaseAgent {
         });
       }
 
-      this.agentLogger.debug(this.agentId, `✅ [SEARCH] Vector indexing completed: ${rules.length} rules`);
+      this.agentLogger.debug(
+        this.agentId,
+        `✅ [SEARCH] Vector indexing completed: ${rules.length} rules`,
+      );
     } catch (error) {
-      this.agentLogger.error(this.agentId, `❌ [SEARCH] Vector indexing failed: ${error instanceof Error ? error.message : error}`);
+      this.agentLogger.error(
+        this.agentId,
+        `❌ [SEARCH] Vector indexing failed: ${error instanceof Error ? error.message : error}`,
+      );
     }
   }
 
@@ -97,11 +114,15 @@ export class SearchAgent extends BaseAgent {
     const category = request.options?.category as string | undefined;
     const limit = (request.options?.limit as number) || 5;
 
-    this.agentLogger.info(this.agentId, `🔍 [SEARCH] Iniciando búsqueda híbrida (BM25 + Vector)`, {
-      query: query.substring(0, 100),
-      category: category || 'all',
-      limit,
-    });
+    this.agentLogger.info(
+      this.agentId,
+      `🔍 [SEARCH] Iniciando búsqueda híbrida (BM25 + Vector)`,
+      {
+        query: query.substring(0, 100),
+        category: category || 'all',
+        limit,
+      },
+    );
 
     // Re-index only if category changed or not indexed
     if (!this.isIndexed || this.lastIndexedCategory !== category) {
@@ -116,18 +137,29 @@ export class SearchAgent extends BaseAgent {
       rules.forEach((rule) => this.bm25Engine.index(rule));
       this.lastIndexedCategory = category;
       this.isIndexed = true;
-      this.agentLogger.info(this.agentId, `✅ [SEARCH] Indexación BM25 completada: ${rules.length} reglas`, {
-        category,
-      });
+      this.agentLogger.info(
+        this.agentId,
+        `✅ [SEARCH] Indexación BM25 completada: ${rules.length} reglas`,
+        {
+          category,
+        },
+      );
 
       // Index for vector search (async, non-blocking)
-      this.indexRulesForVectorSearch(category).catch(err => {
-        this.agentLogger.error(this.agentId, `⚠️ [SEARCH] Vector indexing failed: ${err.message}`);
+      this.indexRulesForVectorSearch(category).catch((err) => {
+        this.agentLogger.error(
+          this.agentId,
+          `⚠️ [SEARCH] Vector indexing failed: ${err.message}`,
+        );
       });
     } else {
-      this.agentLogger.debug(this.agentId, '💾 [SEARCH] Usando índice en caché', {
-        lastIndexedCategory: this.lastIndexedCategory,
-      });
+      this.agentLogger.debug(
+        this.agentId,
+        '💾 [SEARCH] Usando índice en caché',
+        {
+          lastIndexedCategory: this.lastIndexedCategory,
+        },
+      );
     }
 
     // Search with BM25 (keyword-based)
@@ -136,25 +168,36 @@ export class SearchAgent extends BaseAgent {
     });
     const bm25Results = this.bm25Engine.search(query, limit);
 
-    this.agentLogger.info(this.agentId, `✅ [BM25] Búsqueda completada: ${bm25Results.length} resultados`, {
-      query: query.substring(0, 50),
-      resultsCount: bm25Results.length,
-      topScore: bm25Results[0]?.score || 0,
-    });
+    this.agentLogger.info(
+      this.agentId,
+      `✅ [BM25] Búsqueda completada: ${bm25Results.length} resultados`,
+      {
+        query: query.substring(0, 50),
+        resultsCount: bm25Results.length,
+        topScore: bm25Results[0]?.score || 0,
+      },
+    );
 
     // Search with Vector Search (semantic-based)
     let vectorResults: any[] = [];
     if (this.vectorStore) {
       try {
-        this.agentLogger.debug(this.agentId, '🧠 [SEARCH] Ejecutando Vector Search...', {
-          query,
-        });
+        this.agentLogger.debug(
+          this.agentId,
+          '🧠 [SEARCH] Ejecutando Vector Search...',
+          {
+            query,
+          },
+        );
 
         const queryEmbedding = await this.embeddingService.generate(query);
         const vectorStore = await this.initVectorStore();
-        const vectorSearchResults = await vectorStore.search(queryEmbedding.vector, { limit });
+        const vectorSearchResults = await vectorStore.search(
+          queryEmbedding.vector,
+          { limit },
+        );
 
-        vectorResults = vectorSearchResults.map(result => ({
+        vectorResults = vectorSearchResults.map((result) => ({
           rule: {
             id: result.document.metadata.ruleId,
             name: result.document.metadata.title,
@@ -166,13 +209,21 @@ export class SearchAgent extends BaseAgent {
           score: result.score,
         }));
 
-        this.agentLogger.info(this.agentId, `✅ [VectorSearch] Búsqueda completada: ${vectorResults.length} resultados`, {
-          topScore: vectorResults[0]?.score || 0,
-        });
+        this.agentLogger.info(
+          this.agentId,
+          `✅ [VectorSearch] Búsqueda completada: ${vectorResults.length} resultados`,
+          {
+            topScore: vectorResults[0]?.score || 0,
+          },
+        );
       } catch (error) {
-        this.agentLogger.warn(this.agentId, '⚠️ [VectorSearch] Search failed, using BM25 only', {
-          error: error instanceof Error ? error.message : error,
-        });
+        this.agentLogger.warn(
+          this.agentId,
+          '⚠️ [VectorSearch] Search failed, using BM25 only',
+          {
+            error: error instanceof Error ? error.message : error,
+          },
+        );
       }
     }
 
@@ -184,10 +235,12 @@ export class SearchAgent extends BaseAgent {
         query: query.substring(0, 50),
       });
       return {
-        message: "I couldn't find rules related to your search. Try using different keywords or check the available categories.",
+        message:
+          "I couldn't find rules related to your search. Try using different keywords or check the available categories.",
         query,
         results: [],
-        suggestion: 'Try searching for: "Clean Architecture", "CQRS", "NestJS", or "TypeScript"',
+        suggestion:
+          'Try searching for: "Clean Architecture", "CQRS", "NestJS", or "TypeScript"',
       };
     }
 
@@ -202,7 +255,9 @@ export class SearchAgent extends BaseAgent {
         impact: result.rule.impact,
       },
       relevance: `${(result.score * 100).toFixed(1)}%`,
-      summary: result.rule.content.substring(0, 300) + (result.rule.content.length > 300 ? '...' : ''),
+      summary:
+        result.rule.content.substring(0, 300) +
+        (result.rule.content.length > 300 ? '...' : ''),
     }));
 
     this.agentLogger.info(this.agentId, '📦 [SEARCH] Resultados formateados', {
@@ -224,13 +279,17 @@ export class SearchAgent extends BaseAgent {
   /**
    * Merge BM25 and Vector Search results with reciprocal rank fusion
    */
-  private mergeResults(bm25Results: any[], vectorResults: any[], limit: number): any[] {
+  private mergeResults(
+    bm25Results: any[],
+    vectorResults: any[],
+    limit: number,
+  ): any[] {
     const scoreMap = new Map<string, { rule: any; score: number }>();
 
     // Add BM25 results with weight 0.5
     bm25Results.forEach((result, index) => {
       const rank = index + 1;
-      const score = (0.5 * result.score) + (0.4 * (1 / rank)); // BM25 score + reciprocal rank
+      const score = 0.5 * result.score + 0.4 * (1 / rank); // BM25 score + reciprocal rank
       scoreMap.set(result.rule.id, { rule: result.rule, score });
     });
 
@@ -238,12 +297,12 @@ export class SearchAgent extends BaseAgent {
     vectorResults.forEach((result, index) => {
       const rank = index + 1;
       const existing = scoreMap.get(result.rule.id);
-      const newScore = (0.5 * result.score) + (0.4 * (1 / rank));
-      
+      const newScore = 0.5 * result.score + 0.4 * (1 / rank);
+
       if (existing) {
         // Boost score if found in both
-        scoreMap.set(result.rule.id, { 
-          rule: result.rule, 
+        scoreMap.set(result.rule.id, {
+          rule: result.rule,
           score: existing.score + newScore + 0.2, // Bonus for appearing in both searches
         });
       } else {
@@ -276,6 +335,8 @@ export class SearchAgent extends BaseAgent {
       'typescript',
     ];
 
-    return searchKeywords.some((keyword) => input.toLowerCase().includes(keyword));
+    return searchKeywords.some((keyword) =>
+      input.toLowerCase().includes(keyword),
+    );
   }
 }
