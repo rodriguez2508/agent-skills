@@ -51,6 +51,12 @@ export class RouterAgent extends BaseAgent {
     // Combine: agent rules first, then context rules
     const allRules = [...agentRules, ...contextRules];
 
+    // Build system instructions that MUST be followed
+    const systemInstructions = this.buildSystemInstructions(allRules, request.options?.language);
+
+    // Prepend system instructions to the input
+    const finalInput = systemInstructions + request.input;
+
     if (allRules.length > 0) {
       this.agentLogger.info(
         this.agentId,
@@ -60,14 +66,15 @@ export class RouterAgent extends BaseAgent {
           contextRules: contextRules.map((r) => r.name),
         },
       );
-
-      // Add rules context to the request
-      request.options = {
-        ...request.options,
-        relevantRules: allRules,
-        rulesContext: this.formatRulesContext(allRules),
-      };
     }
+
+    // Update request with rules and final input
+    request.input = finalInput;
+    request.options = {
+      ...request.options,
+      relevantRules: allRules,
+      rulesContext: this.formatRulesContext(allRules),
+    };
 
     // Detectar intención
     const intention = this.detectIntention(request.input);
@@ -128,27 +135,16 @@ export class RouterAgent extends BaseAgent {
       },
     );
 
-    // Add language instruction to request
-    const languageInstruction = '\n\nIMPORTANT: Always respond in Spanish (español).';
-    const requestWithLanguage = {
-      ...request,
-      input: request.input + languageInstruction,
-      options: {
-        ...request.options,
-        language: 'es',
-      },
-    };
-
-    // Ejecutar agente especializado
+    // Execute specialized agent (system instructions already prepended to input)
     this.agentLogger.info(
       targetAgent.agentId,
       `▶️ [EXEC] Ejecutando agente especializado`,
       {
-        request: requestWithLanguage.input.substring(0, 100),
+        request: request.input.substring(0, 100),
       },
     );
 
-    const response = await targetAgent.execute(requestWithLanguage);
+    const response = await targetAgent.execute(request);
 
     this.agentLogger.info(
       this.agentId,
@@ -206,10 +202,11 @@ export class RouterAgent extends BaseAgent {
 
   /**
    * Searches for rules by category (e.g., 'agent', 'frontend')
+   * Uses the list endpoint which filters by category directly
    */
   private async searchRelevantRulesByCategory(category: string): Promise<any[]> {
     try {
-      const url = `${this.rulesApiUrl}?q=${category}&category=${category}&limit=10`;
+      const url = `http://localhost:${process.env.PORT || 8004}/rules?category=${category}&limit=20`;
       const response = await fetch(url);
 
       if (!response.ok) {
@@ -221,7 +218,7 @@ export class RouterAgent extends BaseAgent {
       }
 
       const data = await response.json();
-      return data.results?.map((r: any) => r.rule) || [];
+      return data.rules || [];
     } catch (error) {
       this.agentLogger.error(
         this.agentId,
@@ -232,6 +229,49 @@ export class RouterAgent extends BaseAgent {
   }
 
   /**
+   * Builds system instructions that MUST be followed by specialized agents
+   * Includes language, agent rules, and rule IDs for reference
+   */
+  private buildSystemInstructions(rules: any[], language?: string): string {
+    let instructions = '';
+
+    // Language instruction (MANDATORY - at the very beginning)
+    const lang = language || 'es';
+    if (lang === 'es') {
+      instructions += `🌐 **IDIOMA**: You MUST respond entirely in Spanish (español). This is MANDATORY. Do NOT use English except for code blocks, technical terms without Spanish equivalent, or error messages.\n\n`;
+    }
+
+    // Agent rules (language, organization, interaction)
+    const agentRules = rules.filter(r => r.category === 'agent');
+    if (agentRules.length > 0) {
+      instructions += `📋 **AGENT RULES (MUST FOLLOW)**:\n`;
+      agentRules.forEach(rule => {
+        instructions += `\n### [ID: ${rule.id}] ${rule.name}\n`;
+        // Extract key points from rule content
+        const keyPoints = rule.content
+          .split('\n')
+          .filter(line => line.includes('✅') || line.includes('❌') || line.includes('**Impact') || line.trim().startsWith('###'))
+          .slice(0, 5)
+          .join('\n');
+        instructions += keyPoints + '\n';
+      });
+      instructions += '\n---\n\n';
+    }
+
+    // Context rules with IDs
+    const contextRules = rules.filter(r => r.category !== 'agent');
+    if (contextRules.length > 0) {
+      instructions += `📚 **CONTEXT RULES**:\n`;
+      contextRules.forEach(rule => {
+        instructions += `- [ID: ${rule.id}] ${rule.name} (${rule.category})\n`;
+      });
+      instructions += '\n---\n\n';
+    }
+
+    return instructions;
+  }
+
+  /**
    * Formats rules as a context string for agents
    */
   private formatRulesContext(rules: any[]): string {
@@ -239,7 +279,7 @@ export class RouterAgent extends BaseAgent {
 
     let context = '\n\n📋 **Relevant Code Rules:**\n';
     rules.forEach((rule, i) => {
-      context += `\n${i + 1}. **${rule.name}** (${rule.category} - ${rule.impact})\n`;
+      context += `\n${i + 1}. **[ID: ${rule.id}] ${rule.name}** (${rule.category} - ${rule.impact})\n`;
       context += `   ${rule.content.substring(0, 200)}${rule.content.length > 200 ? '...' : ''}\n`;
     });
 

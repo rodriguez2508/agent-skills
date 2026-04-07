@@ -196,14 +196,20 @@ export class McpService {
     try {
       const systemMessage = {
         role: 'system',
-        content: `You are connected to CodeMentor MCP. 
+        content: `You are connected to CodeMentor MCP.
 
 IMPORTANT: You MUST use the MCP tools for all questions and work requests:
-- Use 'agent_query' tool for any question, implementation, analysis, or research
-- The system automatically creates issues for work tasks
-- Use 'search_rules' to find relevant code rules
 
-When a user asks to implement, analyze, create, fix, or research something, you MUST call the 'agent_query' tool with the user's message.
+1. FIRST: Call 'register_project' with the project path when starting work on a project
+   Example: { "projectPath": "/home/user/projects/my-app" }
+
+2. THEN: Use 'agent_query' tool for any question, implementation, analysis, or research
+   ALWAYS include 'projectPath' when calling agent_query
+
+3. Use 'search_rules' to find relevant code rules
+4. Use 'context7_docs' to fetch up-to-date library documentation
+
+When a user asks to implement, analyze, create, fix, or research something, you MUST call the 'agent_query' tool with the user's message AND the projectPath.
 
 Issue tracking is enabled for this session.`,
       };
@@ -1197,8 +1203,12 @@ When in doubt, ALWAYS use the agent_query tool first.`,
           .string()
           .optional()
           .describe('Session ID for conversation continuity'),
+        projectPath: z
+          .string()
+          .optional()
+          .describe('Absolute path to the current project (e.g., /home/user/projects/my-app). ALWAYS include this when you know the project path.'),
       },
-      async ({ message, context, sessionId }, extra) => {
+      async ({ message, context, sessionId, projectPath }, extra) => {
         // Try multiple sources for sessionId: parameter, extra
         const sid = sessionId || extra?.sessionId || 'unknown';
 
@@ -1218,6 +1228,7 @@ When in doubt, ALWAYS use the agent_query tool first.`,
               input: message,
               options: { context, sessionId: sid, language: 'es' },
               sessionId: sid,
+              projectPath,
             }),
           });
 
@@ -1825,6 +1836,58 @@ When in doubt, ALWAYS use the agent_query tool first.`,
         } catch (error) {
           const msg = error instanceof Error ? error.message : 'Error';
           this.logger.error(`❌ MCP: context7_docs failed - ${msg}`);
+          return {
+            content: [{ type: 'text' as const, text: `❌ Error: ${msg}` }],
+            isError: true,
+          };
+        }
+      },
+    );
+
+    // register_project - Register current project with MCP system
+    server.tool(
+      'register_project',
+      'Registers the current project with the MCP system. Detects framework, language, and creates/links project to the current session. ALWAYS call this when starting work on a new project.',
+      {
+        projectPath: z.string().describe('Absolute path to the project (e.g., /home/user/projects/my-app)'),
+      },
+      async ({ projectPath }, extra) => {
+        const sessionId = extra?.sessionId || 'unknown';
+
+        this.logger.log(`📁 MCP: register_project - path="${projectPath}"`);
+
+        try {
+          const response = await fetch(
+            `http://localhost:${this.apiPort}/mcp/register-project`,
+            {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ projectPath, sessionId }),
+            },
+          );
+
+          const result = await response.json();
+
+          if (result.success) {
+            let text = `✅ **Project Registered**\n\n`;
+            text += `- **Name**: \`${result.project.name}\`\n`;
+            text += `- **Framework**: ${result.project.framework}\n`;
+            text += `- **Language**: ${result.project.language}\n`;
+            text += `- **Path**: \`${result.project.path}\`\n`;
+            text += `- **ID**: \`${result.project.id}\`\n`;
+
+            return { content: [{ type: 'text' as const, text }] };
+          } else {
+            return {
+              content: [
+                { type: 'text' as const, text: `⚠️ ${result.error}` },
+              ],
+              isError: true,
+            };
+          }
+        } catch (error) {
+          const msg = error instanceof Error ? error.message : 'Error';
+          this.logger.error(`❌ MCP: register_project failed - ${msg}`);
           return {
             content: [{ type: 'text' as const, text: `❌ Error: ${msg}` }],
             isError: true,

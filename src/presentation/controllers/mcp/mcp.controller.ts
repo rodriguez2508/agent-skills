@@ -17,6 +17,7 @@ import { AgentLoggerService } from '@infrastructure/logging/agent-logger.service
 import { MessageRole } from '@modules/sessions/domain/entities/chat-message.entity';
 import { SSEServerTransport } from '@modelcontextprotocol/sdk/server/sse.js';
 import { RedisService } from '@infrastructure/database/redis/redis.service';
+import { ProjectsService } from '@modules/projects/application/services/projects.service';
 import * as path from 'path';
 
 @ApiTags('MCP')
@@ -30,6 +31,7 @@ export class McpController {
     private readonly identityAgent: IdentityAgent,
     private readonly agentLogger: AgentLoggerService,
     private readonly redisService: RedisService,
+    private readonly projectsService: ProjectsService,
   ) {}
 
   @Get('sse')
@@ -128,6 +130,88 @@ export class McpController {
     } catch (error: any) {
       this.logger.error(`❌ MCP: Error en transport: ${error.message}`);
       res.status(500).json({ error: error.message });
+    }
+  }
+
+  @Post('register-project')
+  @ApiOperation({ summary: 'Register a project with the MCP system' })
+  async registerProject(
+    @Body() body: { projectPath: string; sessionId?: string },
+    @Req() req: Request,
+  ) {
+    const { projectPath, sessionId: providedSessionId } = body;
+
+    if (!projectPath) {
+      return { success: false, error: 'projectPath is required' };
+    }
+
+    const clientIp = req.ip || 'unknown';
+    const sessionId = await this.resolveSessionId(providedSessionId, clientIp);
+
+    this.logger.log(`📁 MCP: Registering project at ${projectPath}`);
+
+    try {
+      // Get or create user by IP
+      const { user } = await this.mcpService['userRepository'].findByIpOrCreate({
+        ipAddress: clientIp,
+      });
+
+      // Detect project from path
+      const detection = await this.projectsService.detectFromPath(projectPath);
+      const projectName = detection?.name || path.basename(projectPath);
+
+      // Create or find project
+      const project = await this.projectsService.findOrCreateForUser(
+        user.id,
+        projectName,
+        projectPath,
+      );
+
+      // Link project to session
+      if (sessionId) {
+        const sessionRepo = this.mcpService['sessionRepository'];
+        const session = await sessionRepo.findBySessionId(sessionId);
+        if (session && !session.projectId) {
+          await sessionRepo.getRepository().update(
+            { id: session.id },
+            { projectId: project.id },
+          );
+        }
+
+        // Cache in Redis
+        await this.redisService.set(
+          `session:${sessionId}:projectId`,
+          project.id,
+          3600,
+        );
+        await this.redisService.set(
+          `session:${sessionId}:projectName`,
+          project.name,
+          3600,
+        );
+      }
+
+      this.logger.log(
+        `✅ Project registered: ${project.name} (${project.id})`,
+      );
+
+      return {
+        success: true,
+        project: {
+          id: project.id,
+          name: project.name,
+          framework: detection?.detectedFramework || 'unknown',
+          language: detection?.detectedArchitecture || 'unknown',
+          path: projectPath,
+        },
+        sessionId,
+      };
+    } catch (error) {
+      this.logger.error(`Error registering project: ${error.message}`);
+      return {
+        success: false,
+        error: error.message,
+      };
     }
   }
 
