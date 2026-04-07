@@ -14,6 +14,7 @@ import { IssueStatus } from '@modules/issues/domain/entities/issue.entity';
 import { ProjectsService } from '@modules/projects/application/services/projects.service';
 import { ContextService } from '@modules/contexts/application/services/context.service';
 import { ContextType } from '@modules/contexts/domain/entities/context.entity';
+import { Context7Adapter } from '@infrastructure/adapters/context7/context7.adapter';
 import * as fs from 'fs/promises';
 import * as path from 'path';
 
@@ -38,6 +39,7 @@ export class McpService {
     private readonly issueService: IssueService,
     private readonly projectsService: ProjectsService,
     private readonly contextService: ContextService,
+    private readonly context7Adapter: Context7Adapter,
   ) {
     this.apiPort = this.configService.get<number>('PORT', 8004);
   }
@@ -236,31 +238,10 @@ Issue tracking is enabled for this session.`,
       `👤 User ${isNew ? 'created' : 'found'} for IP ${ipAddress}: ${userId}`,
     );
 
-    // STEP 1.5: Detect project from process.cwd() - BUT DON'T CREATE YET
-    // Projects are created on-demand when agent detects actual interaction
-    // This avoids the error when no user has interacted yet
+    // STEP 1.5: Project will be detected when user sends first message
+    // DO NOT use process.cwd() as it's the server directory, not the user's project
     const projectId: string | null = null;
     let projectName: string | null = null;
-
-    try {
-      // Read package.json to show in logs, but don't create project yet
-      const packageJson = await this.readPackageJson(process.cwd());
-      projectName = packageJson?.name || null;
-
-      if (projectName) {
-        this.logger.log(
-          `📁 Project detected in cwd: ${projectName} (will be created on first user interaction)`,
-        );
-      } else {
-        this.logger.log(
-          `ℹ️ No package.json found in ${process.cwd()}, project will be created on-demand if needed`,
-        );
-      }
-    } catch (error) {
-      this.logger.debug(
-        `No project detected at session init: ${error.message}`,
-      );
-    }
 
     // STEP 2: TRY TO REUSE EXISTING ACTIVE SESSION FOR THIS IP
     let existingSessionId: string | null = null;
@@ -346,15 +327,14 @@ Issue tracking is enabled for this session.`,
         await this.sessionRepository.create({
           sessionId: transportSessionId,
           userId,
-          projectId: projectId || undefined, // ← Convert null to undefined
+          projectId: projectId || undefined,
           title: `MCP Session - ${ipAddress}${projectName ? ` - ${projectName}` : ''}`,
           metadata: {
             type: 'mcp',
             clientId,
             clientIp: ipAddress,
             createdAt: new Date().toISOString(),
-            projectName,
-            projectPath: process.cwd(),
+            ...(projectName ? { projectName, projectPath: process.cwd() } : {}),
           },
         });
         this.logger.log(
@@ -624,6 +604,7 @@ Issue tracking is enabled for this session.`,
     sessionId: string,
     userId: string,
     userMessage: string,
+    existingProjectId?: string,
   ): Promise<{
     projectId: string | null;
     issueId: string | null;
@@ -632,9 +613,18 @@ Issue tracking is enabled for this session.`,
     try {
       const session = await this.sessionRepository.findBySessionId(sessionId);
 
-      // STEP 1: Detect project name FIRST
-      const projectName = await this.detectProjectName(userMessage);
-      this.logger.log(`🔍 Detected project: ${projectName || 'unknown'}`);
+      // STEP 1: If project already provided, use it; otherwise detect from message
+      let projectId: string | null = existingProjectId || null;
+      let projectName: string | null = null;
+
+      if (existingProjectId) {
+        const existingProject = await this.projectsService.findById(existingProjectId);
+        projectName = existingProject?.name || null;
+        this.logger.log(`📁 Using provided project: ${projectName} (${existingProjectId})`);
+      } else {
+        projectName = await this.detectProjectName(userMessage);
+        this.logger.log(`🔍 Detected project from message: ${projectName || 'unknown'}`);
+      }
 
       // STEP 2: Check if session already has an issue linked
       // This is critical - we don't want to create multiple issues per session!
@@ -647,63 +637,54 @@ Issue tracking is enabled for this session.`,
           `♻️ Session already has issue: ${existingIssueId}. Reusing existing issue.`,
         );
 
-        // Still detect and link project if not already done
-        if (projectName && !session?.projectId) {
-          const project = await this.projectsService.findOrCreateProject({
-            name: projectName,
-            userId,
-            metadata: {
-              detectedFrom: 'mcp-message',
-              initialMessage: userMessage.substring(0, 200),
-            },
-          });
-
+        // Link project if not already done
+        if (projectId && !session?.projectId) {
           await this.sessionRepository
             .getRepository()
-            .update({ sessionId }, { projectId: project.id });
+            .update({ sessionId }, { projectId });
 
           await this.redisService.set(
             `session:${sessionId}:projectId`,
-            project.id,
+            projectId,
             3600,
           );
 
           this.logger.log(
-            `🔗 Project linked to existing issue: ${project.name}`,
+            `🔗 Project linked to existing issue: ${projectName}`,
           );
         }
 
         return {
-          projectId: session?.projectId || null,
+          projectId: session?.projectId || projectId,
           issueId: existingIssueId,
           contextId: null,
         };
       }
 
-      // STEP 3: Find or create project
-      // Always create a project, even if name is not detected (use default name)
-      let projectId: string | null = null;
+      // STEP 3: Find or create project if not already set
+      if (!projectId) {
+        const projectToCreate = {
+          name: projectName || `session-${sessionId.substring(0, 8)}`,
+          userId,
+          metadata: {
+            detectedFrom: projectName ? 'mcp-message' : 'mcp-default',
+            initialMessage: userMessage.substring(0, 200),
+            sessionId,
+          },
+        };
 
-      const projectToCreate = {
-        name: projectName || `session-${sessionId.substring(0, 8)}`,
-        userId,
-        metadata: {
-          detectedFrom: projectName ? 'mcp-message' : 'mcp-default',
-          initialMessage: userMessage.substring(0, 200),
-          sessionId,
-        },
-      };
-
-      const project =
-        await this.projectsService.findOrCreateProject(projectToCreate);
-      projectId = project.id;
+        const project =
+          await this.projectsService.findOrCreateProject(projectToCreate);
+        projectId = project.id;
+        projectName = project.name;
+      }
 
       // Link project to session
-      if (session) {
+      if (session && !session.projectId) {
         await this.sessionRepository
           .getRepository()
           .update({ sessionId }, { projectId });
-        this.logger.log(`🔗 Project linked to session: ${project.name}`);
+        this.logger.log(`🔗 Project linked to session: ${projectName}`);
       }
 
       // Cache project in Redis
@@ -1235,7 +1216,7 @@ When in doubt, ALWAYS use the agent_query tool first.`,
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
               input: message,
-              options: { context, sessionId: sid },
+              options: { context, sessionId: sid, language: 'es' },
               sessionId: sid,
             }),
           });
@@ -1803,6 +1784,55 @@ When in doubt, ALWAYS use the agent_query tool first.`,
       },
     );
 
+    // context7_docs - Fetch up-to-date library documentation
+    server.tool(
+      'context7_docs',
+      'Fetches up-to-date, version-specific documentation and code examples for libraries using Context7. Use when user asks about library docs, API usage, or how to use a framework.',
+      {
+        library: z.string().describe('Library name or ID (e.g., "Next.js" or "/vercel/next.js")'),
+        query: z.string().describe('What you need help with (e.g., "middleware authentication", "setup")'),
+      },
+      async ({ library, query }, extra) => {
+        const sessionId = extra?.sessionId || 'unknown';
+
+        this.logger.log(`📚 MCP: context7_docs - library="${library}", query="${query}"`);
+
+        try {
+          let result;
+
+          // Check if library is a direct ID (starts with /)
+          if (library.startsWith('/')) {
+            result = await this.context7Adapter.getDocs(library, query);
+          } else {
+            result = await this.context7Adapter.searchDocs(library, query);
+          }
+
+          if (!result.success) {
+            return {
+              content: [
+                { type: 'text' as const, text: `⚠️ ${result.documentation}` },
+              ],
+              isError: true,
+            };
+          }
+
+          let text = `📚 **Documentation for** \`${result.libraryId}\` (${result.libraryName})\n\n`;
+          text += `**Query**: ${query}\n\n`;
+          text += `---\n\n`;
+          text += result.documentation;
+
+          return { content: [{ type: 'text' as const, text }] };
+        } catch (error) {
+          const msg = error instanceof Error ? error.message : 'Error';
+          this.logger.error(`❌ MCP: context7_docs failed - ${msg}`);
+          return {
+            content: [{ type: 'text' as const, text: `❌ Error: ${msg}` }],
+            isError: true,
+          };
+        }
+      },
+    );
+
     this.logger.log('✅ MCP: Todas las herramientas registradas');
   }
 
@@ -1855,5 +1885,43 @@ When in doubt, ALWAYS use the agent_query tool first.`,
     }
 
     return `${prefix}: ${JSON.stringify(data, null, 2)}`;
+  }
+
+  /**
+   * Detects framework from package.json
+   */
+  private detectFramework(packageJson: any): string {
+    const deps = {
+      ...packageJson.dependencies,
+      ...packageJson.devDependencies,
+    };
+
+    if (deps['@angular/core']) return 'angular';
+    if (deps['@nestjs/common'] || deps['@nestjs/core']) return 'nestjs';
+    if (deps['react']) return 'react';
+    if (deps['vue']) return 'vue';
+    if (deps['express']) return 'node-express';
+    if (deps['fastify']) return 'node-fastify';
+    if (deps['next']) return 'nextjs';
+    if (deps['nuxt']) return 'nuxtjs';
+
+    return 'node';
+  }
+
+  /**
+   * Detects primary language from package.json
+   */
+  private detectLanguage(packageJson: any): string {
+    if (
+      packageJson.dependencies?.['@angular/core'] ||
+      packageJson.dependencies?.['@nestjs/common']
+    ) {
+      return 'TypeScript';
+    }
+
+    const hasTs = packageJson.dependencies?.['typescript'] || packageJson.devDependencies?.['typescript'];
+    if (hasTs) return 'TypeScript';
+
+    return 'JavaScript';
   }
 }

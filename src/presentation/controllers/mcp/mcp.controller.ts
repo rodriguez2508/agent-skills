@@ -17,6 +17,7 @@ import { AgentLoggerService } from '@infrastructure/logging/agent-logger.service
 import { MessageRole } from '@modules/sessions/domain/entities/chat-message.entity';
 import { SSEServerTransport } from '@modelcontextprotocol/sdk/server/sse.js';
 import { RedisService } from '@infrastructure/database/redis/redis.service';
+import * as path from 'path';
 
 @ApiTags('MCP')
 @Controller('mcp')
@@ -446,19 +447,59 @@ export class McpController {
         }
 
         if (userId) {
-          // Use the new processUserMessage method which handles:
-          // 1. Project detection
-          // 2. Intention detection (work vs analysis)
-          // 3. Issue creation (only for work)
-          // 4. Context creation
+          // STEP 1: If projectPath is provided, detect/create project from it
+          if (projectPath) {
+            try {
+              const projectsService = this.mcpService['projectsService'];
+              const detection = await projectsService.detectFromPath(projectPath);
+              const projectName = detection?.name || path.basename(projectPath);
+
+              const project = await projectsService.findOrCreateForUser(
+                userId,
+                projectName,
+                projectPath,
+              );
+
+              projectIdForSession = project.id;
+
+              // Link project to session
+              const sessionRepo = this.mcpService['sessionRepository'];
+              const session = await sessionRepo.findBySessionId(sessionId);
+              if (session && !session.projectId) {
+                await sessionRepo.getRepository().update(
+                  { id: session.id },
+                  { projectId: project.id },
+                );
+                this.logger.log(
+                  `🔗 Project linked to session: ${project.name} (${project.id})`,
+                );
+              }
+
+              // Cache in Redis
+              await this.redisService.set(
+                `session:${sessionId}:projectId`,
+                project.id,
+                3600,
+              );
+
+              this.logger.log(
+                `📁 Project detected from path: ${projectName} (${project.id})`,
+              );
+            } catch (error) {
+              this.logger.warn(`Error detecting project from path: ${error.message}`);
+            }
+          }
+
+          // STEP 2: Process user message (issue creation, context, etc.)
           const result = await this.mcpService.processUserMessage(
             sessionId,
             userId,
             input,
+            projectIdForSession || undefined,
           );
 
           issueIdForSession = result.issueId;
-          projectIdForSession = result.projectId;
+          projectIdForSession = result.projectId || projectIdForSession;
           contextIdForSession = result.contextId;
 
           this.agentLogger.info(
@@ -479,10 +520,12 @@ export class McpController {
         this.logger.error(`Error processing user message: ${error.message}`);
       }
 
-      // Add issueId to options
+      // Add issueId and language preference to options
       const optionsWithIssue = {
         ...optionsWithRules,
         issueId: issueIdForSession,
+        projectId: projectIdForSession,
+        language: 'es', // Always respond in Spanish
       };
 
       // Activate RouterAgent to route to specialized agent WITH RULES CONTEXT

@@ -43,6 +43,9 @@ import { FrontendArchitectureModule } from '@agents/frontend-architecture/fronte
 import { WebSearchAgent } from '@agents/web-search/web-search.agent';
 import { WebSearchModule } from '@agents/web-search/web-search.module';
 import { SearchModule } from '@infrastructure/adapters/search/search.module';
+import { Context7Agent } from '@agents/context7/context7.agent';
+import { Context7AgentModule } from '@agents/context7/context7.module';
+import { Context7Module as InfrastructureContext7Module } from '@infrastructure/adapters/context7/context7.module';
 
 // Domain
 import { RULE_REPOSITORY } from '@core/domain/ports/rule-repository.token';
@@ -83,6 +86,8 @@ import { IpTrackerMiddleware } from '@shared/middleware/ip-tracker.middleware';
     ContextsModule,
     FrontendArchitectureModule,
     WebSearchModule,
+    Context7AgentModule,
+    InfrastructureContext7Module,
   ],
   controllers: [
     HealthController,
@@ -121,6 +126,7 @@ import { IpTrackerMiddleware } from '@shared/middleware/ip-tracker.middleware';
     GitHubAgent,
     FrontendArchitectureAgent,
     WebSearchAgent,
+    Context7Agent,
 
     // CQRS Handlers
     SearchRulesHandler,
@@ -147,6 +153,7 @@ export class AppModule implements OnModuleInit {
     private readonly gitHubAgent: GitHubAgent,
     private readonly frontendArchitectureAgent: FrontendArchitectureAgent,
     private readonly webSearchAgent: WebSearchAgent,
+    private readonly context7Agent: Context7Agent,
     private readonly rulesEngine: RulesEngine,
   ) {}
 
@@ -167,6 +174,7 @@ export class AppModule implements OnModuleInit {
     this.agentRegistry.register(this.gitHubAgent);
     this.agentRegistry.register(this.frontendArchitectureAgent);
     this.agentRegistry.register(this.webSearchAgent);
+    this.agentRegistry.register(this.context7Agent);
 
     // Register agents in the router
     this.routerAgent.registerAllAgents();

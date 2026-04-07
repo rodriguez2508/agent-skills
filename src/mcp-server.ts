@@ -112,6 +112,25 @@ const TOOLS = [
       },
     },
   },
+  {
+    name: 'context7_docs',
+    description:
+      'Fetches up-to-date, version-specific documentation for libraries using Context7. Use when asking about library docs, API usage, or framework setup.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        library: {
+          type: 'string',
+          description: 'Library name or ID (e.g., "Next.js" or "/vercel/next.js")',
+        },
+        query: {
+          type: 'string',
+          description: 'What you need help with (e.g., "middleware authentication")',
+        },
+      },
+      required: ['library', 'query'],
+    },
+  },
 ];
 
 // List Tools Handler
@@ -213,6 +232,85 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         const data = await response.json();
 
         result = formatCodeMentorResponse('list', data);
+        break;
+      }
+
+      case 'context7_docs': {
+        const library = args?.library as string;
+        const query = args?.query as string;
+
+        const context7ApiKey = process.env.CONTEXT7_API_KEY || '';
+        const context7Enabled = process.env.CONTEXT7_ENABLED === 'true';
+
+        if (!context7Enabled || !context7ApiKey) {
+          result = '⚠️ Context7 is not enabled. Set CONTEXT7_ENABLED=true and CONTEXT7_API_KEY in your environment.';
+          break;
+        }
+
+        const apiBaseUrl = 'https://context7.com/api/v2';
+        const libraryId = library.startsWith('/') ? library : null;
+
+        let docsResult: string;
+
+        if (libraryId) {
+          // Direct library ID
+          const docsResponse = await fetch(
+            `${apiBaseUrl}/context?libraryId=${encodeURIComponent(libraryId)}&query=${encodeURIComponent(query)}`,
+            {
+              headers: {
+                'Authorization': `Bearer ${context7ApiKey}`,
+                'Content-Type': 'application/json',
+              },
+            },
+          );
+
+          if (!docsResponse.ok) {
+            docsResult = `Error fetching documentation: ${docsResponse.status} ${docsResponse.statusText}`;
+          } else {
+            const docsData = await docsResponse.json();
+            docsResult = docsData.context || docsData.documentation || 'No documentation found.';
+          }
+        } else {
+          // Search by library name first
+          const searchResponse = await fetch(
+            `${apiBaseUrl}/libs/search?query=${encodeURIComponent(library)}&libraryName=${encodeURIComponent(library)}`,
+            {
+              headers: {
+                'Authorization': `Bearer ${context7ApiKey}`,
+                'Content-Type': 'application/json',
+              },
+            },
+          );
+
+          if (!searchResponse.ok) {
+            docsResult = `Error searching library: ${searchResponse.status} ${searchResponse.statusText}`;
+          } else {
+            const searchData = await searchResponse.json();
+            if (!searchData.results || searchData.results.length === 0) {
+              docsResult = `Library "${library}" not found in Context7 index. Check https://context7.com for available libraries.`;
+            } else {
+              const foundLibrary = searchData.results[0];
+              const docsResponse = await fetch(
+                `${apiBaseUrl}/context?libraryId=${encodeURIComponent(foundLibrary.id)}&query=${encodeURIComponent(query)}`,
+                {
+                  headers: {
+                    'Authorization': `Bearer ${context7ApiKey}`,
+                    'Content-Type': 'application/json',
+                  },
+                },
+              );
+
+              if (!docsResponse.ok) {
+                docsResult = `Error fetching documentation: ${docsResponse.status} ${docsResponse.statusText}`;
+              } else {
+                const docsData = await docsResponse.json();
+                docsResult = docsData.context || docsData.documentation || 'No documentation found.';
+              }
+            }
+          }
+        }
+
+        result = `📚 **Documentation for** \`${library}\`\n\n**Query**: ${query}\n\n---\n\n${docsResult}`;
         break;
       }
 

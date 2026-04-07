@@ -29,7 +29,7 @@ export class Project {
   @Index()
   name: string; // Project name (e.g., "linki-f", "agent-skills-api")
 
-  @Column({ type: 'varchar', length: 500, nullable: true })
+  @Column({ type: 'varchar', length: 500, nullable: true, name: 'repo_url' })
   repoUrl?: string; // GitHub/GitLab repository URL
 
   @Column({ type: 'text', nullable: true })

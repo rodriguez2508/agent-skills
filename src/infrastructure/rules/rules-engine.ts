@@ -113,6 +113,30 @@ export class RulesEngine implements OnModuleInit {
   }
 
   /**
+   * Obtiene reglas del agente (siempre se aplican)
+   * Estas reglas definen cómo el agente debe interactuar con el usuario
+   */
+  getAgentRules(): Rule[] {
+    return this.getRulesByCategory('agent');
+  }
+
+  /**
+   * Obtiene reglas de contexto/lenguaje (Angular, NestJS, etc.)
+   */
+  getContextRules(context: string, limit: number = 5): Rule[] {
+    return this.getRelevantRules(context, limit);
+  }
+
+  /**
+   * Obtiene todas las reglas aplicables: agente + contexto
+   */
+  getAllApplicableRules(context: string, contextLimit: number = 5): Rule[] {
+    const agentRules = this.getAgentRules();
+    const contextRules = this.getContextRules(context, contextLimit);
+    return [...agentRules, ...contextRules];
+  }
+
+  /**
    * Formatea una respuesta aplicando reglas
    */
   formatResponseWithRules(response: string, context?: string): string {

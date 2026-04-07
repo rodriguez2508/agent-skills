@@ -30,6 +30,7 @@ export class RouterAgent extends BaseAgent {
   /**
    * Maneja la solicitud detectando intención y enrutando
    * Automatically searches for relevant rules before routing
+   * Agent rules are ALWAYS applied first, then context rules
    */
   protected async handle(request: AgentRequest): Promise<AgentResponse> {
     this.agentLogger.info(
@@ -41,23 +42,30 @@ export class RouterAgent extends BaseAgent {
       },
     );
 
-    // AUTO-APPLY RULES: Search for relevant rules on every request
-    const relevantRules = await this.searchRelevantRules(request.input);
+    // STEP 1: ALWAYS apply agent rules (language, organization, interaction)
+    const agentRules = await this.searchRelevantRulesByCategory('agent');
 
-    if (relevantRules.length > 0) {
+    // STEP 2: Search for context-specific rules (Angular, NestJS, etc.)
+    const contextRules = await this.searchRelevantRules(request.input);
+
+    // Combine: agent rules first, then context rules
+    const allRules = [...agentRules, ...contextRules];
+
+    if (allRules.length > 0) {
       this.agentLogger.info(
         this.agentId,
-        `📚 [ROUTER] Found ${relevantRules.length} relevant rules`,
+        `📚 [ROUTER] Found ${allRules.length} rules (${agentRules.length} agent + ${contextRules.length} context)`,
         {
-          rules: relevantRules.map((r) => r.name),
+          agentRules: agentRules.map((r) => r.name),
+          contextRules: contextRules.map((r) => r.name),
         },
       );
 
       // Add rules context to the request
       request.options = {
         ...request.options,
-        relevantRules,
-        rulesContext: this.formatRulesContext(relevantRules),
+        relevantRules: allRules,
+        rulesContext: this.formatRulesContext(allRules),
       };
     }
 
@@ -100,7 +108,7 @@ export class RouterAgent extends BaseAgent {
           intention,
           targetAgent: this.agentId,
           availableAgents: this.agentRegistry.getAgentIds(),
-          relevantRules: relevantRules.length > 0 ? relevantRules : undefined,
+          relevantRules: allRules.length > 0 ? allRules : undefined,
         },
         metadata: {
           agentId: this.agentId,
@@ -120,16 +128,27 @@ export class RouterAgent extends BaseAgent {
       },
     );
 
+    // Add language instruction to request
+    const languageInstruction = '\n\nIMPORTANT: Always respond in Spanish (español).';
+    const requestWithLanguage = {
+      ...request,
+      input: request.input + languageInstruction,
+      options: {
+        ...request.options,
+        language: 'es',
+      },
+    };
+
     // Ejecutar agente especializado
     this.agentLogger.info(
       targetAgent.agentId,
       `▶️ [EXEC] Ejecutando agente especializado`,
       {
-        request: request.input.substring(0, 100),
+        request: requestWithLanguage.input.substring(0, 100),
       },
     );
 
-    const response = await targetAgent.execute(request);
+    const response = await targetAgent.execute(requestWithLanguage);
 
     this.agentLogger.info(
       this.agentId,
@@ -149,10 +168,10 @@ export class RouterAgent extends BaseAgent {
         routedBy: this.agentId,
         targetAgent: targetAgent.agentId,
         intention,
-        relevantRules: relevantRules.length > 0 ? relevantRules : undefined,
+        relevantRules: allRules.length > 0 ? allRules : undefined,
         rulesContext:
-          relevantRules.length > 0
-            ? this.formatRulesContext(relevantRules)
+          allRules.length > 0
+            ? this.formatRulesContext(allRules)
             : undefined,
       },
     };
@@ -186,6 +205,33 @@ export class RouterAgent extends BaseAgent {
   }
 
   /**
+   * Searches for rules by category (e.g., 'agent', 'frontend')
+   */
+  private async searchRelevantRulesByCategory(category: string): Promise<any[]> {
+    try {
+      const url = `${this.rulesApiUrl}?q=${category}&category=${category}&limit=10`;
+      const response = await fetch(url);
+
+      if (!response.ok) {
+        this.agentLogger.warn(
+          this.agentId,
+          `Rules API returned non-OK status: ${response.status}`,
+        );
+        return [];
+      }
+
+      const data = await response.json();
+      return data.results?.map((r: any) => r.rule) || [];
+    } catch (error) {
+      this.agentLogger.error(
+        this.agentId,
+        `Failed to search rules by category: ${error.message}`,
+      );
+      return [];
+    }
+  }
+
+  /**
    * Formats rules as a context string for agents
    */
   private formatRulesContext(rules: any[]): string {
@@ -206,6 +252,35 @@ export class RouterAgent extends BaseAgent {
   private detectIntention(input: string): string {
     const lowerInput = input.toLowerCase();
 
+    // Patrones de Context7 (documentación de librerías) - ALTA PRIORIDAD
+    if (
+      this.matchesPattern(lowerInput, [
+        'context7',
+        'use context7',
+        'documentación de',
+        'documentacion de',
+        'docs de',
+        'library docs',
+        'library documentation',
+        'api docs',
+        'api documentation',
+        'cómo usar',
+        'como usar',
+        'how to use',
+        'properly use',
+        'best practices for',
+        'best practices',
+        'configure',
+        'configurar',
+        'setup',
+        'set up',
+        'implementar',
+        'implement',
+      ])
+    ) {
+      return 'context7';
+    }
+
     // Patrones de Product Management (PRIORIDAD ALTA)
     if (
       this.matchesPattern(lowerInput, [
@@ -222,10 +297,8 @@ export class RouterAgent extends BaseAgent {
         'prd',
         'product requirements',
         'documento de producto',
-        'producto',
-        'product manager',
-        'pm',
         'valor de negocio',
+        'business value',
       ])
     ) {
       return 'pm';
@@ -396,6 +469,7 @@ export class RouterAgent extends BaseAgent {
     const agentMap: Record<string, string> = {
       search: 'SearchAgent',
       'web-search': 'WebSearchAgent',
+      context7: 'Context7Agent',
       code: 'CodeAgent',
       rules: 'RulesAgent',
       architecture: 'ArchitectureAgent',
