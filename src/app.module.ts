@@ -62,6 +62,9 @@ import { AuthController } from '@modules/auth/presentation/controllers/auth.cont
 // Middleware
 import { IpTrackerMiddleware } from '@shared/middleware/ip-tracker.middleware';
 
+// Agent Config Module (Gentle AI migration)
+import { AgentsModule } from '@modules/agents/agents.module';
+
 @Module({
   imports: [
     ConfigModule.forRoot({
@@ -88,6 +91,9 @@ import { IpTrackerMiddleware } from '@shared/middleware/ip-tracker.middleware';
     WebSearchModule,
     Context7AgentModule,
     InfrastructureContext7Module,
+
+    // Agent Config Module (Gentle AI migration)
+    AgentsModule,
   ],
   controllers: [
     HealthController,
