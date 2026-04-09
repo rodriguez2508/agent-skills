@@ -41,7 +41,9 @@ export class McpInstallerService {
     serverConfig: Record<string, unknown>,
   ): Promise<void> {
     if (!adapter.supportsMCP()) {
-      this.logger.debug(`Agent ${adapter.agent()} does not support MCP. Skipping.`);
+      this.logger.debug(
+        `Agent ${adapter.agent()} does not support MCP. Skipping.`,
+      );
       return;
     }
 
@@ -54,7 +56,11 @@ export class McpInstallerService {
         break;
 
       case MCPStrategy.MergeIntoSettings:
-        await this.mergeIntoSettings(adapter.settingsPath(homeDir), serverName, serverConfig);
+        await this.mergeIntoSettings(
+          adapter.settingsPath(homeDir),
+          serverName,
+          serverConfig,
+        );
         break;
 
       case MCPStrategy.MCPConfigFile:
@@ -66,7 +72,9 @@ export class McpInstallerService {
         break;
 
       default:
-        this.logger.warn(`Unknown MCP strategy for ${adapter.agent()}: ${strategy}`);
+        this.logger.warn(
+          `Unknown MCP strategy for ${adapter.agent()}: ${strategy}`,
+        );
     }
   }
 
@@ -81,16 +89,23 @@ export class McpInstallerService {
     for (const [name, config] of Object.entries(servers)) {
       await this.installServer(adapter, homeDir, name, config);
     }
-    this.logger.log(`Installed ${Object.keys(servers).length} MCP servers for: ${adapter.agent()}`);
+    this.logger.log(
+      `Installed ${Object.keys(servers).length} MCP servers for: ${adapter.agent()}`,
+    );
   }
 
   /**
    * Installs the default agent-skills-api MCP server.
    * This is the main integration point for Qwen and other agents.
    */
-  async installDefaultServer(adapter: IAgentAdapter, homeDir: string): Promise<void> {
+  async installDefaultServer(
+    adapter: IAgentAdapter,
+    homeDir: string,
+  ): Promise<void> {
     if (!adapter.supportsMCP()) {
-      this.logger.debug(`Agent ${adapter.agent()} does not support MCP. Skipping.`);
+      this.logger.debug(
+        `Agent ${adapter.agent()} does not support MCP. Skipping.`,
+      );
       return;
     }
 
@@ -107,7 +122,12 @@ export class McpInstallerService {
       ],
     };
 
-    await this.installServer(adapter, homeDir, 'agent-skills-api', serverConfig);
+    await this.installServer(
+      adapter,
+      homeDir,
+      'agent-skills-api',
+      serverConfig,
+    );
     this.logger.log(`Default MCP server installed for: ${adapter.agent()}`);
   }
 
@@ -125,16 +145,42 @@ export class McpInstallerService {
   }
 
   /**
-   * Strategy: Merge into settings.json.
-   * Example: OpenCode, Gemini
+   * Strategy: Merge mcpServers into settings.json.
+   * Example: Qwen CLI, OpenCode, Gemini
    */
   private async mergeIntoSettings(
     settingsPath: string,
     serverName: string,
     serverConfig: Record<string, unknown>,
   ): Promise<void> {
-    const content = JSON.stringify({ mcpServers: { [serverName]: serverConfig } }, null, 2);
-    await this.fileMerge.writeWithMarkers(settingsPath, content, `mcp-${serverName}`);
+    let existing: Record<string, unknown> = {};
+
+    // Read existing settings.json
+    try {
+      const raw = await fs.readFile(settingsPath, 'utf-8');
+      const cleanJson = raw.replace(/<!--[\s\S]*?-->/g, '').trim();
+      if (cleanJson) {
+        existing = JSON.parse(cleanJson);
+      }
+    } catch {
+      // File doesn't exist yet, start fresh
+    }
+
+    // Ensure mcpServers exists
+    if (!existing.mcpServers) {
+      (existing as any).mcpServers = {};
+    }
+
+    // Merge the server config
+    ((existing as any).mcpServers as Record<string, unknown>)[serverName] =
+      serverConfig;
+
+    // Write back the merged settings
+    const content = JSON.stringify(existing, null, 2) + '\n';
+    await fs.mkdir(path.dirname(settingsPath), { recursive: true });
+    await fs.writeFile(settingsPath, content, 'utf-8');
+
+    this.logger.debug(`Merged MCP server '${serverName}' into settings.json`);
   }
 
   /**
@@ -198,6 +244,10 @@ export class McpInstallerService {
     }
 
     const content = tomlLines.join('\n');
-    await this.fileMerge.writeWithMarkers(configPath, content, `mcp-${serverName}`);
+    await this.fileMerge.writeWithMarkers(
+      configPath,
+      content,
+      `mcp-${serverName}`,
+    );
   }
 }

@@ -46,12 +46,12 @@ export class QwenAgentAdapter extends BaseAgentAdapter {
   }
 
   mcpStrategy(): MCPStrategy {
-    return MCPStrategy.MCPConfigFile;
+    return MCPStrategy.MergeIntoSettings;
   }
 
   mcpConfigPath(_homeDir: string, _serverName: string): string {
-    // Qwen uses a single mcp.json file for all servers
-    return path.join(this.globalConfigDir(_homeDir), 'mcp.json');
+    // Qwen uses mcpServers in settings.json, not separate mcp.json
+    return this.settingsPath(_homeDir);
   }
 
   supportsSkills(): boolean {
