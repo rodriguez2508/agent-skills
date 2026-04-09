@@ -1,6 +1,10 @@
 import { Injectable } from '@nestjs/common';
 import { BaseAgent } from '@core/agents/base.agent';
-import { AgentRequest, AgentResponse } from '@core/agents/agent-response';
+import {
+  AgentRequest,
+  AgentResponse,
+  AgentAction,
+} from '@core/agents/agent-response';
 import { AgentRegistry } from '@core/agents/agent-registry';
 import {
   AgentLoggerService,
@@ -52,7 +56,10 @@ export class RouterAgent extends BaseAgent {
     const allRules = [...agentRules, ...contextRules];
 
     // Build system instructions that MUST be followed
-    const systemInstructions = this.buildSystemInstructions(allRules, request.options?.language);
+    const systemInstructions = this.buildSystemInstructions(
+      allRules,
+      request.options?.language,
+    );
 
     // Prepend system instructions to the input
     const finalInput = systemInstructions + request.input;
@@ -101,6 +108,12 @@ export class RouterAgent extends BaseAgent {
       );
 
       // Si no hay agente especializado, devolver respuesta genérica
+      const nextAction: AgentAction = {
+        type: 'request_more_info',
+        action: 'clarify',
+        task: request.input,
+      };
+
       return {
         success: true,
         data: {
@@ -114,6 +127,7 @@ export class RouterAgent extends BaseAgent {
             '- Issue workflow tracking',
           intention,
           targetAgent: this.agentId,
+          nextAction,
           availableAgents: this.agentRegistry.getAgentIds(),
           relevantRules: allRules.length > 0 ? allRules : undefined,
         },
@@ -135,40 +149,45 @@ export class RouterAgent extends BaseAgent {
       },
     );
 
-    // Execute specialized agent (system instructions already prepended to input)
-    this.agentLogger.info(
-      targetAgent.agentId,
-      `▶️ [EXEC] Ejecutando agente especializado`,
-      {
-        request: request.input.substring(0, 100),
+    // NEW: Return nextAction instead of executing directly
+    // This allows Qwen to execute the agent with clean context
+    const nextAction = {
+      type: 'execute_agent' as const,
+      agent: targetAgent.agentId,
+      action: 'execute',
+      task: request.input,
+      context: {
+        projectPath: request.options?.projectPath,
+        rulesContext: this.formatRulesContext(allRules),
+        relevantRules: allRules,
       },
-    );
-
-    const response = await targetAgent.execute(request);
+    };
 
     this.agentLogger.info(
       this.agentId,
-      `📤 [ROUTER] Respuesta recibida de ${targetAgent.agentId}`,
+      `📤 [ROUTER] Devolviendo nextAction para ${targetAgent.agentId}`,
       {
-        success: response.success,
-        executionTime: response.metadata?.executionTime,
-        hasError: !!response.error,
+        nextActionType: nextAction.type,
+        hasRules: allRules.length > 0,
       },
     );
 
-    // Retornar respuesta con contexto de enrutamiento y reglas
+    // Return response WITH nextAction (not executed yet)
     return {
-      ...response,
+      success: true,
       data: {
-        ...response.data,
-        routedBy: this.agentId,
+        message: `Entendido. Para completar tu solicitud, ejecutaré el agente ${targetAgent.agentId}.`,
         targetAgent: targetAgent.agentId,
         intention,
+        nextAction,
         relevantRules: allRules.length > 0 ? allRules : undefined,
         rulesContext:
-          allRules.length > 0
-            ? this.formatRulesContext(allRules)
-            : undefined,
+          allRules.length > 0 ? this.formatRulesContext(allRules) : undefined,
+      },
+      metadata: {
+        agentId: this.agentId,
+        executionTime: Date.now() - (request as any).startTime || 0,
+        timestamp: new Date(),
       },
     };
   }
@@ -204,7 +223,9 @@ export class RouterAgent extends BaseAgent {
    * Searches for rules by category (e.g., 'agent', 'frontend')
    * Uses the list endpoint which filters by category directly
    */
-  private async searchRelevantRulesByCategory(category: string): Promise<any[]> {
+  private async searchRelevantRulesByCategory(
+    category: string,
+  ): Promise<any[]> {
     try {
       const url = `http://localhost:${process.env.PORT || 8004}/rules?category=${category}&limit=20`;
       const response = await fetch(url);
@@ -242,15 +263,21 @@ export class RouterAgent extends BaseAgent {
     }
 
     // Agent rules (language, organization, interaction)
-    const agentRules = rules.filter(r => r.category === 'agent');
+    const agentRules = rules.filter((r) => r.category === 'agent');
     if (agentRules.length > 0) {
       instructions += `📋 **AGENT RULES (MUST FOLLOW)**:\n`;
-      agentRules.forEach(rule => {
+      agentRules.forEach((rule) => {
         instructions += `\n### [ID: ${rule.id}] ${rule.name}\n`;
         // Extract key points from rule content
         const keyPoints = rule.content
           .split('\n')
-          .filter(line => line.includes('✅') || line.includes('❌') || line.includes('**Impact') || line.trim().startsWith('###'))
+          .filter(
+            (line) =>
+              line.includes('✅') ||
+              line.includes('❌') ||
+              line.includes('**Impact') ||
+              line.trim().startsWith('###'),
+          )
           .slice(0, 5)
           .join('\n');
         instructions += keyPoints + '\n';
@@ -259,10 +286,10 @@ export class RouterAgent extends BaseAgent {
     }
 
     // Context rules with IDs
-    const contextRules = rules.filter(r => r.category !== 'agent');
+    const contextRules = rules.filter((r) => r.category !== 'agent');
     if (contextRules.length > 0) {
       instructions += `📚 **CONTEXT RULES**:\n`;
-      contextRules.forEach(rule => {
+      contextRules.forEach((rule) => {
         instructions += `- [ID: ${rule.id}] ${rule.name} (${rule.category})\n`;
       });
       instructions += '\n---\n\n';

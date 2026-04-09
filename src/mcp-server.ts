@@ -121,14 +121,45 @@ const TOOLS = [
       properties: {
         library: {
           type: 'string',
-          description: 'Library name or ID (e.g., "Next.js" or "/vercel/next.js")',
+          description:
+            'Library name or ID (e.g., "Next.js" or "/vercel/next.js")',
         },
         query: {
           type: 'string',
-          description: 'What you need help with (e.g., "middleware authentication")',
+          description:
+            'What you need help with (e.g., "middleware authentication")',
         },
       },
       required: ['library', 'query'],
+    },
+  },
+  {
+    name: 'execute_agent',
+    description:
+      'Ejecuta un agente específico con contexto limpio. Usado para ejecutar sub-agentes con sus skills/rules. Devuelve nextAction para continuar el flujo.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        agent: {
+          type: 'string',
+          enum: ['router', 'analysis'],
+          description: 'Agente a ejecutar (router o analysis)',
+        },
+        task: {
+          type: 'string',
+          description: 'Tarea o pregunta para el agente',
+        },
+        projectPath: {
+          type: 'string',
+          description: 'Path al proyecto (opcional)',
+        },
+        clearContext: {
+          type: 'boolean',
+          default: true,
+          description: 'Limpiar contexto previo antes de ejecutar',
+        },
+      },
+      required: ['agent', 'task'],
     },
   },
 ];
@@ -243,7 +274,8 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         const context7Enabled = process.env.CONTEXT7_ENABLED === 'true';
 
         if (!context7Enabled || !context7ApiKey) {
-          result = '⚠️ Context7 is not enabled. Set CONTEXT7_ENABLED=true and CONTEXT7_API_KEY in your environment.';
+          result =
+            '⚠️ Context7 is not enabled. Set CONTEXT7_ENABLED=true and CONTEXT7_API_KEY in your environment.';
           break;
         }
 
@@ -258,7 +290,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
             `${apiBaseUrl}/context?libraryId=${encodeURIComponent(libraryId)}&query=${encodeURIComponent(query)}`,
             {
               headers: {
-                'Authorization': `Bearer ${context7ApiKey}`,
+                Authorization: `Bearer ${context7ApiKey}`,
                 'Content-Type': 'application/json',
               },
             },
@@ -268,7 +300,10 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
             docsResult = `Error fetching documentation: ${docsResponse.status} ${docsResponse.statusText}`;
           } else {
             const docsData = await docsResponse.json();
-            docsResult = docsData.context || docsData.documentation || 'No documentation found.';
+            docsResult =
+              docsData.context ||
+              docsData.documentation ||
+              'No documentation found.';
           }
         } else {
           // Search by library name first
@@ -276,7 +311,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
             `${apiBaseUrl}/libs/search?query=${encodeURIComponent(library)}&libraryName=${encodeURIComponent(library)}`,
             {
               headers: {
-                'Authorization': `Bearer ${context7ApiKey}`,
+                Authorization: `Bearer ${context7ApiKey}`,
                 'Content-Type': 'application/json',
               },
             },
@@ -294,7 +329,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
                 `${apiBaseUrl}/context?libraryId=${encodeURIComponent(foundLibrary.id)}&query=${encodeURIComponent(query)}`,
                 {
                   headers: {
-                    'Authorization': `Bearer ${context7ApiKey}`,
+                    Authorization: `Bearer ${context7ApiKey}`,
                     'Content-Type': 'application/json',
                   },
                 },
@@ -304,13 +339,69 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
                 docsResult = `Error fetching documentation: ${docsResponse.status} ${docsResponse.statusText}`;
               } else {
                 const docsData = await docsResponse.json();
-                docsResult = docsData.context || docsData.documentation || 'No documentation found.';
+                docsResult =
+                  docsData.context ||
+                  docsData.documentation ||
+                  'No documentation found.';
               }
             }
           }
         }
 
         result = `📚 **Documentation for** \`${library}\`\n\n**Query**: ${query}\n\n---\n\n${docsResult}`;
+        break;
+      }
+
+      case 'execute_agent': {
+        const agent = args?.agent as string;
+        const task = args?.task as string;
+        const projectPath = args?.projectPath as string | undefined;
+        const clearContext = (args?.clearContext as boolean) ?? true;
+
+        console.error(
+          `🔧 [MCP] execute_agent: ${agent} | task: ${task.substring(0, 50)}... | clearContext: ${clearContext}`,
+        );
+
+        // Build request for the agent
+        const agentRequest = {
+          input: task,
+          options: {
+            projectPath,
+            clearContext,
+          },
+        };
+
+        // Call the internal agent endpoint
+        const response = await fetch(`${API_URL}/agents/execute`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(agentRequest),
+        });
+
+        if (!response.ok) {
+          throw new Error(`Agent execution failed: ${response.status}`);
+        }
+
+        const agentData = await response.json();
+
+        // Format the response with nextAction info
+        const targetAgent = agentData.data?.targetAgent || agent;
+        const nextAction = agentData.data?.nextAction;
+
+        let responseMessage = agentData.data?.message || '';
+
+        // Add nextAction instructions for Qwen
+        if (nextAction) {
+          responseMessage += `\n\n📋 **Acción próxima**: Debes ejecutar el agente \`${nextAction.agent}\` con la tarea: "${nextAction.task?.substring(0, 100)}..."`;
+          responseMessage += `\n\nPara continuar, usa el tool \`execute_agent\` con:\n- agent: "${nextAction.agent}"\n- task: "${nextAction.task}"\n- projectPath: ${projectPath ? `"${projectPath}"` : 'null'}`;
+        }
+
+        // Add relevant rules if present
+        if (agentData.data?.relevantRules?.length > 0) {
+          responseMessage += `\n\n📚 **Reglas aplicadas**: ${agentData.data.relevantRules.length} regla(s) encontrada(s)`;
+        }
+
+        result = responseMessage;
         break;
       }
 
