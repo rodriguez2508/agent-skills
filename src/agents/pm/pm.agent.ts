@@ -12,12 +12,18 @@ import { BaseAgent } from '@core/agents/base.agent';
 import { AgentRequest, AgentResponse } from '@core/agents/agent-response';
 import { AgentLoggerService } from '@infrastructure/logging/agent-logger.service';
 import { IssueService } from '@modules/issues/application/services/issue.service';
+import {
+  RedisIssueContextService,
+  IssueContextData,
+  IssueMessage,
+} from '@infrastructure/cache/redis-issue-context.service';
 
 @Injectable()
 export class PMAgent extends BaseAgent {
   constructor(
     private readonly agentLogger: AgentLoggerService,
     private readonly issueService: IssueService,
+    private readonly redisContextService: RedisIssueContextService,
   ) {
     super(
       'PMAgent',
@@ -138,6 +144,9 @@ export class PMAgent extends BaseAgent {
 
     // CREATE ISSUE IN DATABASE
     let issueData: any = {};
+    const projectId = request.options?.projectId;
+    const projectName = request.options?.projectName;
+
     if (userId) {
       try {
         issueData = await this.issueService.createIssue({
@@ -146,10 +155,12 @@ export class PMAgent extends BaseAgent {
           requirements: businessContext.expectedOutcome,
           userId,
           sessionId,
+          projectId,
           metadata: {
             autoCreated: true,
             source: 'PMAgent',
             businessValue: this.estimateBusinessValue(businessContext.feature),
+            projectName,
           },
         });
       } catch (error) {
@@ -158,6 +169,34 @@ export class PMAgent extends BaseAgent {
           `Failed to create issue in DB: ${error.message}`,
         );
       }
+    }
+
+    // SAVE CONTEXT TO REDIS
+    if (issueData.id && projectId) {
+      const contextData: IssueContextData = {
+        issueId: issueData.id,
+        projectId,
+        projectName: projectName || 'unknown',
+        title: issueData.title || this.generatePMTitle(businessContext.feature),
+        initialMessage: input,
+        createdAt: new Date().toISOString(),
+        lastActivityAt: new Date().toISOString(),
+        messages: [
+          {
+            role: 'user',
+            content: input,
+            timestamp: new Date().toISOString(),
+          },
+        ],
+        keyDecisions: [],
+        filesModified: [],
+      };
+
+      await this.redisContextService.saveContext(issueData.id, contextData);
+      this.agentLogger.info(
+        this.agentId,
+        `💾 Context saved to Redis for issue: ${issueData.id}`,
+      );
     }
 
     // Generate issue in PM format (NOT technical!)
@@ -505,7 +544,10 @@ ${context.expectedOutcome}`,
   }
 
   private generatePMTitle(feature: string): string {
-    // Convert technical feature to business-friendly title
+    const now = new Date();
+    const date = now.toISOString().split('T')[0];
+    const time = now.toTimeString().split(' ')[0].substring(0, 5);
+
     const titleMap: Record<string, string> = {
       auth: 'Autenticación de Usuarios',
       login: 'Inicio de Sesión',
@@ -515,14 +557,61 @@ ${context.expectedOutcome}`,
       report: 'Reportes y Analytics',
       export: 'Exportación de Datos',
       dashboard: 'Dashboard Principal',
+      analysis: 'Análisis de Proyecto',
+      analyze: 'Análisis de Proyecto',
+      analiza: 'Análisis de Proyecto',
+      analizar: 'Análisis de Proyecto',
     };
 
     for (const [key, title] of Object.entries(titleMap)) {
-      if (feature.toLowerCase().includes(key)) return title;
+      if (feature.toLowerCase().includes(key)) {
+        return `${title} - ${date}`;
+      }
     }
 
-    // Default: capitalize first letter
-    return feature.charAt(0).toUpperCase() + feature.slice(1);
+    return `${feature.charAt(0).toUpperCase() + feature.slice(1)} - ${date}`;
+  }
+
+  async generateAITitle(
+    userInput: string,
+    projectName?: string,
+  ): Promise<string> {
+    const now = new Date();
+    const date = now.toISOString().split('T')[0];
+
+    const inputLower = userInput.toLowerCase();
+
+    const patterns: Record<string, string> = {
+      analiza: 'Análisis de',
+      análisis: 'Análisis de',
+      analyze: 'Análisis de',
+      implementa: 'Implementación de',
+      implementar: 'Implementación de',
+      crea: 'Crear',
+      crear: 'Crear',
+      mejora: 'Mejora de',
+      mejorar: 'Mejora de',
+      corrige: 'Corrección de',
+      corregir: 'Corrección de',
+      refactor: 'Refactorización de',
+      test: 'Testing de',
+      bug: 'Fix de Bug en',
+    };
+
+    for (const [pattern, prefix] of Object.entries(patterns)) {
+      if (inputLower.includes(pattern)) {
+        const feature = userInput
+          .replace(new RegExp(pattern, 'gi'), '')
+          .replace(/^(de|del|el|la|los|las)\s+/i, '')
+          .trim()
+          .substring(0, 50);
+
+        return `${prefix} ${feature || 'proyecto'} - ${date}`;
+      }
+    }
+
+    const words = userInput.split(/\s+/).slice(0, 5).join(' ');
+    return `${words.substring(0, 60)} - ${date}`;
   }
 
   private matchesPattern(input: string, patterns: string[]): boolean {

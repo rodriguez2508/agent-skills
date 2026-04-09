@@ -46,6 +46,8 @@ import { SearchModule } from '@infrastructure/adapters/search/search.module';
 import { Context7Agent } from '@agents/context7/context7.agent';
 import { Context7AgentModule } from '@agents/context7/context7.module';
 import { Context7Module as InfrastructureContext7Module } from '@infrastructure/adapters/context7/context7.module';
+import { ContextAgent } from '@agents/context/context.agent';
+import { RedisIssueContextService } from '@infrastructure/cache/redis-issue-context.service';
 
 // Domain
 import { RULE_REPOSITORY } from '@core/domain/ports/rule-repository.token';
@@ -133,6 +135,10 @@ import { AgentsModule } from '@modules/agents/agents.module';
     FrontendArchitectureAgent,
     WebSearchAgent,
     Context7Agent,
+    ContextAgent,
+
+    // Services
+    RedisIssueContextService,
 
     // CQRS Handlers
     SearchRulesHandler,
@@ -160,6 +166,7 @@ export class AppModule implements OnModuleInit {
     private readonly frontendArchitectureAgent: FrontendArchitectureAgent,
     private readonly webSearchAgent: WebSearchAgent,
     private readonly context7Agent: Context7Agent,
+    private readonly contextAgent: ContextAgent,
     private readonly rulesEngine: RulesEngine,
   ) {}
 
@@ -181,6 +188,7 @@ export class AppModule implements OnModuleInit {
     this.agentRegistry.register(this.frontendArchitectureAgent);
     this.agentRegistry.register(this.webSearchAgent);
     this.agentRegistry.register(this.context7Agent);
+    this.agentRegistry.register(this.contextAgent);
 
     // Register agents in the router
     this.routerAgent.registerAllAgents();
