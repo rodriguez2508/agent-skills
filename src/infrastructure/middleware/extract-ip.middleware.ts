@@ -13,9 +13,7 @@ import { Request, Response, NextFunction } from 'express';
  * - req.ipAddress - IP limpia
  * - req.userId - Usado como identificador temporal de usuario
  */
-@Injectable()
-export class ExtractIpMiddleware implements NestMiddleware {
-  use(req: Request, res: Response, next: NextFunction) {
+export function ExtractIpMiddleware(req: Request, res: Response, next: NextFunction) {
     // Extraer IP real (considerando proxies y load balancers)
     const forwardedFor = req.headers['x-forwarded-for'] as string;
     const realIp = req.headers['x-real-ip'] as string;
@@ -44,5 +42,4 @@ export class ExtractIpMiddleware implements NestMiddleware {
     (req as any).userId = ipAddress;
 
     next();
-  }
 }

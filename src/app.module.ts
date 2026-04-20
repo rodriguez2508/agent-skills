@@ -6,7 +6,6 @@ import { ScheduleModule } from '@nestjs/schedule';
 // Infrastructure
 import { BM25Engine } from '@infrastructure/search/bm25/bm25.engine';
 import { RuleFileRepository } from '@infrastructure/persistence/repositories/rule-file.repository';
-import { GrpcServerAdapter } from '@infrastructure/adapters/grpc/grpc-server.adapter';
 import { McpService } from '@infrastructure/adapters/mcp/mcp.service';
 import { AgentLoggerService } from '@infrastructure/logging/agent-logger.service';
 import { RulesEngine } from '@infrastructure/rules/rules-engine';
@@ -112,7 +111,7 @@ import { AgentsModule } from '@modules/agents/agents.module';
       provide: RULE_REPOSITORY,
       useClass: RuleFileRepository,
     },
-    GrpcServerAdapter,
+
     McpService,
     AgentLoggerService,
     RulesEngine,

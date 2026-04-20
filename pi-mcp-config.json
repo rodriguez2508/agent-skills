@@ -1,0 +1,16 @@
+{
+  "mcpServers": {
+    "agent-skills-api": {
+      "url": "http://localhost:8004/mcp/sse",
+      "trust": true,
+      "priority": "high"
+    }
+  },
+  "instructions": {
+    "defaultBehavior": "Use 'agent_query' tool for ALL user requests. This tool automatically routes to specialized agents (PMAgent, CodeAgent, SearchAgent, ArchitectureAgent, AnalysisAgent, Context7Agent) and creates issues when needed. The agent-skills-api provides code rules, project analysis, and specialized agents.",
+    "context7Usage": "When user asks about library documentation, API usage, or how to use a framework, use 'context7_docs' tool to fetch up-to-date documentation. Also works through 'agent_query' which auto-routes to Context7Agent.",
+    "pmRequests": "When user asks to create issues, user stories, or requirements, the agent_query tool will automatically invoke PMAgent which creates issues in the database.",
+    "sessionManagement": "Always pass sessionId parameter to maintain conversation history and context across messages.",
+    "projectRegistration": "When starting work on a project, ALWAYS call 'register_project' tool first with the project path to enable project-specific features and issue tracking."
+  }
+}

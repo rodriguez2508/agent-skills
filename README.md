@@ -65,6 +65,16 @@ curl http://localhost:8004/health
 | **AnalysisAgent** | Análisis de código |
 | **MetricsAgent** | Métricas y tracking |
 
+## 🤖 Agentes CLI Compatibles
+
+| Agente | Configuración | Estado |
+|--------|--------------|--------|
+| **Qwen Code** | `qwen-mcp-config.json` | ✅ Configurado |
+| **OpenCode** | `.opencode.json` | ✅ Configurado |
+| **Gemini CLI** | `gemini-mcp-config.json` | ✅ Configurado |
+| **Cursor** | `.cursor/settings.json` | 📝 Ver doc/MCP-CONFIG.md |
+| **Claude Code** | `~/.claude/mcp.json` | 📝 Ver doc/MCP-CONFIG.md |
+
 ---
 
 ## 🛠️ Scripts Disponibles
@@ -84,6 +94,10 @@ pnpm run test
 
 # Lint
 pnpm run lint
+
+# Gemini Setup
+pnpm run agent:setup-gemini          # Setup Gemini MCP config
+pnpm run agent:setup-gemini:force   # Force overwrite existing config
 ```
 
 ---
@@ -97,6 +111,22 @@ pnpm run lint
 | `GET` | `/rules/search?q=xxx` | Buscar reglas |
 | `GET` | `/mcp/sse` | MCP SSE endpoint |
 | `GET` | `/api` | Swagger UI |
+
+---
+
+## 🔧 Configuración Gemini
+
+Para configurar Gemini CLI con Agent Skills API:
+
+```bash
+# Copiar configuración
+cp gemini-mcp-config.json ~/.gemini/mcp.json
+
+# Editar la ruta del servidor MCP si es necesario
+nano ~/.gemini/mcp.json
+```
+
+Ver `.gemini/INSTRUCTIONS.md` para más detalles.
 
 ---
 
