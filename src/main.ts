@@ -7,11 +7,8 @@ import { ExtractIpMiddleware } from '@infrastructure/middleware/extract-ip.middl
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
 
-  // Global middleware (use instance, not class)
-  app.use((req, res, next) => {
-    const middleware = new ExtractIpMiddleware();
-    middleware.use(req, res, next);
-  });
+  // Global middleware
+  app.use(ExtractIpMiddleware);
 
   // Global pipes
   app.useGlobalPipes(

@@ -25,6 +25,10 @@ Call `agent_query` with the task and project path:
 agent_query({ message: "implementar arquitectura Angular", projectPath: "/path/to/project" })
 ```
 
+## Git Commits
+- ❌ NEVER add `Co-Authored-By` or any authorship trailer to commit messages
+- ✅ Commit messages must contain only: subject line + optional body describing the change
+
 ## What NOT to Do
 - ❌ Do NOT answer technical questions from memory
 - ❌ Do NOT respond in English

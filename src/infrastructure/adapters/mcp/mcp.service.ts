@@ -17,6 +17,10 @@ import { ContextType } from '@modules/contexts/domain/entities/context.entity';
 import { Context7Adapter } from '@infrastructure/adapters/context7/context7.adapter';
 import * as fs from 'fs/promises';
 import * as path from 'path';
+import { promisify } from 'util';
+import { exec } from 'child_process';
+
+const execAsync = promisify(exec);
 
 export interface McpSession {
   server: McpServer;
@@ -1621,27 +1625,39 @@ When in doubt, ALWAYS use the agent_query tool first.`,
         repo: z.string().optional().describe('Nombre del repo (ej: repo)'),
       },
       async ({ issueRef, owner, repo }, extra) => {
-        const sessionId = extra?.sessionId || 'unknown';
-
         this.logger.log(`🐙 MCP: read_github_issue - issueRef="${issueRef}"`);
 
         try {
-          // Execute through agent
-          const response = await fetch(
-            `http://localhost:${this.apiPort}/mcp/chat`,
-            {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                input: `Lee el issue ${issueRef} de github.com/${owner || 'owner'}/${repo || 'repo'}`,
-                options: { sessionId, githubOwner: owner, githubRepo: repo },
-                sessionId,
-              }),
-            },
-          );
+          let resolvedOwner = owner;
+          let resolvedRepo = repo;
+          let issueNumber = issueRef;
 
-          const result = await response.json();
-          const text = result.data?.message || 'Issue obtenido';
+          // Parse URL: https://github.com/owner/repo/issues/123
+          const urlMatch = issueRef.match(
+            /github\.com\/([^/]+)\/([^/]+)\/issues\/(\d+)/,
+          );
+          if (urlMatch) {
+            resolvedOwner = urlMatch[1];
+            resolvedRepo = urlMatch[2];
+            issueNumber = urlMatch[3];
+          } else {
+            // Strip leading # if present
+            issueNumber = issueRef.replace(/^#/, '');
+          }
+
+          const repoFlag =
+            resolvedOwner && resolvedRepo
+              ? `--repo ${resolvedOwner}/${resolvedRepo}`
+              : '';
+
+          const cmd = `gh issue view ${issueNumber} ${repoFlag} --json title,body,labels,assignees,state,comments`;
+          const { stdout, stderr } = await execAsync(cmd);
+
+          if (stderr) {
+            this.logger.warn(`gh issue view stderr: ${stderr}`);
+          }
+
+          const text = stdout.trim() || 'Sin resultado';
           return { content: [{ type: 'text' as const, text }] };
         } catch (error) {
           const msg = error instanceof Error ? error.message : 'Error';

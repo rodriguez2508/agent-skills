@@ -5,6 +5,7 @@ import { SystemService } from '@infrastructure/system/system.service';
 import { AgentConfigRegistryService } from '@infrastructure/adapters/agent-config/agent-config-registry.service';
 import { QwenAgentAdapter } from '@infrastructure/adapters/agent-config/qwen.adapter';
 import { OpenCodeAgentAdapter } from '@infrastructure/adapters/agent-config/opencode.adapter';
+import { ClaudeAgentAdapter } from '@infrastructure/adapters/agent-config/claude.adapter';
 import { SddInstallerService } from '@modules/agents/application/services/sdd-installer.service';
 import { SkillsInstallerService } from '@modules/agents/application/services/skills-installer.service';
 import { McpInstallerService } from '@modules/agents/application/services/mcp-installer.service';
@@ -39,6 +40,7 @@ import { AgentConfigController } from '@modules/agents/presentation/controllers/
     AgentConfigRegistryService,
     QwenAgentAdapter,
     OpenCodeAgentAdapter,
+    ClaudeAgentAdapter,
 
     // Component Installers
     SddInstallerService,
@@ -66,12 +68,14 @@ export class AgentsModule implements OnModuleInit {
     private readonly registry: AgentConfigRegistryService,
     private readonly qwenAdapter: QwenAgentAdapter,
     private readonly opencodeAdapter: OpenCodeAgentAdapter,
+    private readonly claudeAdapter: ClaudeAgentAdapter,
   ) {}
 
   async onModuleInit(): Promise<void> {
     // Register all agent adapters
     this.registry.register(this.qwenAdapter);
     this.registry.register(this.opencodeAdapter);
+    this.registry.register(this.claudeAdapter);
 
     this.logger.log(`✅ Agent Config Module initialized`);
     this.logger.log(`📊 Registered agent adapters: ${this.registry.count()}`);
