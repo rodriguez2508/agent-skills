@@ -144,18 +144,22 @@ const port = configService.get('PORT', 3000);
 export class AuthModule {}
 ```
 
-### 10. **Comments in English**
+### 10. **Comments in English — JSDoc only**
 
-All comments must be written in **English** for consistency across the codebase.
+All comments must be written in **English**. Use JSDoc (`/** */`) for documentation — never plain `//` comments for explanations that belong in docs.
 
 ```typescript
-// ❌ BAD - Spanish comment
-// Verifica si el usuario existe
-const user = await this.findOne(id);
+// ❌ BAD - Plain comment instead of JSDoc
+// Creates a new user and sends welcome email
+async createUser(data: CreateUserDto): Promise<User> {}
 
-// ✅ GOOD - English comment
-// Check if user exists
-const user = await this.findOne(id);
+// ✅ GOOD - JSDoc in English
+/**
+ * Creates a new user and sends a welcome email.
+ * @param data - User creation payload
+ * @returns Created user entity
+ */
+async createUser(data: CreateUserDto): Promise<User> {}
 ```
 
 ---
@@ -271,7 +275,7 @@ async getUser(id: string): Promise<User> {
 - [ ] Public APIs have JSDoc
 - [ ] TODOs have issue references
 - [ ] Complex logic is documented
-- [ ] Comments are in English
+- [ ] Comments in English, using JSDoc for public APIs
 - [ ] Comments are up-to-date with code
 - [ ] No redundant type information
 - [ ] Inline comments on separate lines

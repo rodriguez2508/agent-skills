@@ -18,6 +18,7 @@ import { MessageRole } from '@modules/sessions/domain/entities/chat-message.enti
 import { SSEServerTransport } from '@modelcontextprotocol/sdk/server/sse.js';
 import { RedisService } from '@infrastructure/database/redis/redis.service';
 import { ProjectsService } from '@modules/projects/application/services/projects.service';
+import { McpPlanService } from '@modules/plans/application/services/mcp-plan.service';
 import * as path from 'path';
 
 @ApiTags('MCP')
@@ -32,6 +33,7 @@ export class McpController {
     private readonly agentLogger: AgentLoggerService,
     private readonly redisService: RedisService,
     private readonly projectsService: ProjectsService,
+    private readonly mcpPlanService: McpPlanService,
   ) {}
 
   @Get('sse')
@@ -136,10 +138,20 @@ export class McpController {
   @Post('register-project')
   @ApiOperation({ summary: 'Register a project with the MCP system' })
   async registerProject(
-    @Body() body: { projectPath: string; sessionId?: string },
+    @Body()
+    body: {
+      projectPath: string;
+      sessionId?: string;
+      relatedProjects?: Array<{
+        projectPath?: string;
+        projectId?: string;
+        type?: string;
+        description?: string;
+      }>;
+    },
     @Req() req: Request,
   ) {
-    const { projectPath, sessionId: providedSessionId } = body;
+    const { projectPath, sessionId: providedSessionId, relatedProjects } = body;
 
     if (!projectPath) {
       return { success: false, error: 'projectPath is required' };
@@ -151,16 +163,15 @@ export class McpController {
     this.logger.log(`📁 MCP: Registering project at ${projectPath}`);
 
     try {
-      // Get or create user by IP
-      const { user } = await this.mcpService['userRepository'].findByIpOrCreate({
-        ipAddress: clientIp,
-      });
+      const { user } = await this.mcpService['userRepository'].findByIpOrCreate(
+        {
+          ipAddress: clientIp,
+        },
+      );
 
-      // Detect project from path
       const detection = await this.projectsService.detectFromPath(projectPath);
       const projectName = detection?.name || path.basename(projectPath);
 
-      // Create or find project
       const project = await this.projectsService.findOrCreateForUser(
         user.id,
         projectName,
@@ -172,13 +183,10 @@ export class McpController {
         const sessionRepo = this.mcpService['sessionRepository'];
         const session = await sessionRepo.findBySessionId(sessionId);
         if (session && !session.projectId) {
-          await sessionRepo.getRepository().update(
-            { id: session.id },
-            { projectId: project.id },
-          );
+          await sessionRepo
+            .getRepository()
+            .update({ id: session.id }, { projectId: project.id });
         }
-
-        // Cache in Redis
         await this.redisService.set(
           `session:${sessionId}:projectId`,
           project.id,
@@ -191,9 +199,51 @@ export class McpController {
         );
       }
 
-      this.logger.log(
-        `✅ Project registered: ${project.name} (${project.id})`,
-      );
+      // Resolve and link related projects
+      const linkedRelationships: Array<{
+        name: string;
+        type: string;
+        id: string;
+      }> = [];
+      if (relatedProjects?.length) {
+        for (const rel of relatedProjects) {
+          let targetId = rel.projectId;
+
+          if (!targetId && rel.projectPath) {
+            const relDetection = await this.projectsService.detectFromPath(
+              rel.projectPath,
+            );
+            const relName =
+              relDetection?.name || path.basename(rel.projectPath);
+            const relProject = await this.projectsService.findOrCreateForUser(
+              user.id,
+              relName,
+              rel.projectPath,
+            );
+            targetId = relProject.id;
+          }
+
+          if (targetId) {
+            const relationship = await this.projectsService.linkProjects(
+              project.id,
+              targetId,
+              rel.type ?? 'depends_on',
+              rel.description,
+            );
+            const target = await this.projectsService.findById(targetId);
+            linkedRelationships.push({
+              id: relationship.id,
+              name: target?.name ?? targetId,
+              type: relationship.type,
+            });
+            this.logger.log(
+              `🔗 Linked ${project.name} → ${target?.name} (${relationship.type})`,
+            );
+          }
+        }
+      }
+
+      this.logger.log(`✅ Project registered: ${project.name} (${project.id})`);
 
       return {
         success: true,
@@ -204,6 +254,7 @@ export class McpController {
           language: detection?.detectedArchitecture || 'unknown',
           path: projectPath,
         },
+        linkedRelationships,
         sessionId,
       };
     } catch (error) {
@@ -212,6 +263,84 @@ export class McpController {
         success: false,
         error: error.message,
       };
+    }
+  }
+
+  @Get('plans/active')
+  @ApiOperation({
+    summary:
+      'Verifica si hay un mcp_plan activo para la sesión (usado por hooks)',
+  })
+  async getActivePlan(@Query('sessionId') sessionId: string) {
+    if (!sessionId) return { hasPlan: false };
+    const plan = await this.mcpPlanService.findBySession(sessionId);
+    return {
+      hasPlan: !!plan,
+      planId: plan?.id,
+      title: plan?.title,
+      status: plan?.status,
+    };
+  }
+
+  @Post('projects/link')
+  @ApiOperation({ summary: 'Vincula dos proyectos por path' })
+  async linkProjects(
+    @Body()
+    body: {
+      sourceProjectPath: string;
+      targetProjectPath: string;
+      type?: string;
+      description?: string;
+    },
+    @Req() req: Request,
+  ) {
+    const {
+      sourceProjectPath,
+      targetProjectPath,
+      type = 'depends_on',
+      description,
+    } = body;
+    if (!sourceProjectPath || !targetProjectPath) {
+      return {
+        success: false,
+        error: 'sourceProjectPath and targetProjectPath are required',
+      };
+    }
+    try {
+      const clientIp = req.ip || 'unknown';
+      const { user } = await this.mcpService['userRepository'].findByIpOrCreate(
+        { ipAddress: clientIp },
+      );
+      const [src, tgt] = await Promise.all([
+        this.projectsService.findOrCreateForUser(
+          user.id,
+          path.basename(sourceProjectPath),
+          sourceProjectPath,
+        ),
+        this.projectsService.findOrCreateForUser(
+          user.id,
+          path.basename(targetProjectPath),
+          targetProjectPath,
+        ),
+      ]);
+      const rel = await this.projectsService.linkProjects(
+        src.id,
+        tgt.id,
+        type,
+        description,
+      );
+      this.logger.log(`🔗 Linked: ${src.name} → ${tgt.name} (${type})`);
+      return {
+        success: true,
+        relationship: {
+          id: rel.id,
+          source: src.name,
+          target: tgt.name,
+          type: rel.type,
+        },
+      };
+    } catch (error) {
+      return { success: false, error: error.message };
     }
   }
 
@@ -535,7 +664,8 @@ export class McpController {
           if (projectPath) {
             try {
               const projectsService = this.mcpService['projectsService'];
-              const detection = await projectsService.detectFromPath(projectPath);
+              const detection =
+                await projectsService.detectFromPath(projectPath);
               const projectName = detection?.name || path.basename(projectPath);
 
               const project = await projectsService.findOrCreateForUser(
@@ -550,10 +680,9 @@ export class McpController {
               const sessionRepo = this.mcpService['sessionRepository'];
               const session = await sessionRepo.findBySessionId(sessionId);
               if (session && !session.projectId) {
-                await sessionRepo.getRepository().update(
-                  { id: session.id },
-                  { projectId: project.id },
-                );
+                await sessionRepo
+                  .getRepository()
+                  .update({ id: session.id }, { projectId: project.id });
                 this.logger.log(
                   `🔗 Project linked to session: ${project.name} (${project.id})`,
                 );
@@ -570,7 +699,9 @@ export class McpController {
                 `📁 Project detected from path: ${projectName} (${project.id})`,
               );
             } catch (error) {
-              this.logger.warn(`Error detecting project from path: ${error.message}`);
+              this.logger.warn(
+                `Error detecting project from path: ${error.message}`,
+              );
             }
           }
 
@@ -629,16 +760,67 @@ export class McpController {
         },
       );
 
+      const [userId, projectName] = await Promise.all([
+        this.redisService.get<string>(`session:${sessionId}:userId`),
+        this.redisService.get<string>(`session:${sessionId}:projectName`),
+      ]);
+
       const response = await this.routerAgent.execute({
         input,
         options: {
           ...optionsWithIssue,
           sessionId,
-          userId: await this.redisService.get(`session:${sessionId}:userId`),
-          projectPath: projectPath || projectIdForSession,
+          userId,
+          projectId: projectIdForSession || undefined,
+          projectName: projectName || undefined,
+          projectPath,
           projectContext,
+          rawInput: input, // input original sin reglas prepended
         },
       });
+
+      // ── EJECUTAR agente especializado si el router lo indicó ────────────────
+      if (
+        response.data?.nextAction?.type === 'execute_agent' &&
+        response.data?.nextAction?.agent
+      ) {
+        const targetAgentId: string = response.data.nextAction.agent;
+        const targetAgent =
+          this.routerAgent['agentRegistry'].getAgent(targetAgentId);
+
+        if (targetAgent) {
+          this.logger.log(`🤖 Executing specialized agent: ${targetAgentId}`);
+          try {
+            const agentResponse = await targetAgent.execute({
+              input,
+              options: {
+                ...optionsWithIssue,
+                sessionId,
+                userId,
+                projectId: projectIdForSession || undefined,
+                projectName: projectName || undefined,
+                projectPath,
+                rulesContext: response.data?.rulesContext,
+                relevantRules,
+                planId: response.data?.planId,
+              },
+            });
+
+            if (agentResponse.success && agentResponse.data?.message) {
+              // Merge: keep routing metadata + replace message with agent output
+              response.data.message = agentResponse.data.message;
+              response.data.targetAgent = targetAgentId; // ← preservar para el log del MCP tool
+              response.data.agentExecuted = targetAgentId;
+              if (agentResponse.data?.steps)
+                response.data.steps = agentResponse.data.steps;
+            }
+          } catch (agentErr) {
+            this.logger.warn(
+              `⚠️ Specialized agent ${targetAgentId} failed: ${agentErr.message} — keeping router response`,
+            );
+          }
+        }
+      }
 
       // SAVE RESPONSE TO POSTGRESQL with rules metadata
       if (sessionId && response.data?.message) {
@@ -1278,5 +1460,110 @@ export class McpController {
       `⚠️ No session found for IP ${clientIp}, using provided or fallback`,
     );
     return providedSessionId || 'unknown';
+  }
+
+  @Post('plans/create')
+  @ApiOperation({ summary: 'Crea un plan MCP explícitamente en BD' })
+  async createPlan(
+    @Body()
+    body: {
+      title: string;
+      summary?: string;
+      intention?: string;
+      projectPath?: string;
+      sessionId?: string;
+      agentId?: string;
+      steps?: Array<{
+        order: number;
+        description: string;
+        agentId?: string;
+        status?: string;
+      }>;
+    },
+    @Req() req: Request,
+  ) {
+    const {
+      title,
+      summary,
+      intention,
+      projectPath,
+      sessionId,
+      agentId,
+      steps,
+    } = body;
+    if (!title) {
+      return { success: false, error: 'title is required' };
+    }
+    try {
+      const clientIp = req.ip || 'unknown';
+      const resolvedSessionId =
+        sessionId || (await this.resolveSessionId(undefined, clientIp));
+      let projectId: string | undefined;
+      if (projectPath) {
+        const { user } = await this.mcpService[
+          'userRepository'
+        ].findByIpOrCreate({ ipAddress: clientIp });
+        const detection =
+          await this.projectsService.detectFromPath(projectPath);
+        const projectName = detection?.name || path.basename(projectPath);
+        const project = await this.projectsService.findOrCreateForUser(
+          user.id,
+          projectName,
+          projectPath,
+        );
+        projectId = project.id;
+      }
+      const plan = await this.mcpPlanService.create({
+        title,
+        projectId,
+        sessionId:
+          resolvedSessionId !== 'unknown' ? resolvedSessionId : undefined,
+        agentId: agentId || 'RouterAgent',
+        plan: {
+          summary: summary || title,
+          detectedIntention: intention || 'code',
+          steps: steps?.map((s) => ({
+            order: s.order,
+            description: s.description,
+            agentId: s.agentId,
+            status: (s.status as any) || 'pending',
+          })) || [{ order: 1, description: title, status: 'in_progress' }],
+          rulesApplied: [],
+          agentsInvolved: agentId ? [agentId] : ['RouterAgent'],
+        },
+      });
+      this.logger.log(`📋 Plan created via API: ${plan.id} | ${title}`);
+      return {
+        success: true,
+        data: { id: plan.id, title: plan.title, status: plan.status },
+      };
+    } catch (error) {
+      return { success: false, error: error.message };
+    }
+  }
+
+  @Get('plans')
+  @ApiOperation({ summary: 'Lista planes MCP por sesión o proyecto' })
+  async listPlans(
+    @Query('sessionId') sessionId?: string,
+    @Query('projectId') projectId?: string,
+    @Query('status') status?: string,
+  ) {
+    try {
+      if (sessionId) {
+        const plan = await this.mcpPlanService.findBySession(sessionId);
+        return { success: true, data: plan ? [plan] : [] };
+      }
+      if (projectId) {
+        const plans = await this.mcpPlanService.findByProject(
+          projectId,
+          status as any,
+        );
+        return { success: true, data: plans };
+      }
+      return { success: true, data: [] };
+    } catch (error) {
+      return { success: false, error: error.message };
+    }
   }
 }

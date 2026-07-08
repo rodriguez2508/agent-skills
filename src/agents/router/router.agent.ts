@@ -6,10 +6,13 @@ import {
   AgentAction,
 } from '@core/agents/agent-response';
 import { AgentRegistry } from '@core/agents/agent-registry';
+import { AgentLoggerService } from '@infrastructure/logging/agent-logger.service';
+import { AgentCatalogService } from '@modules/agents/application/services/agent-catalog.service';
 import {
-  AgentLoggerService,
-  LogLevel,
-} from '@infrastructure/logging/agent-logger.service';
+  PatternService,
+  SuggestedNext,
+} from '@modules/agents/application/services/pattern.service';
+import { McpPlanService } from '@modules/plans/application/services/mcp-plan.service';
 
 /**
  * RouterAgent - Orquestador principal de agentes
@@ -23,6 +26,9 @@ export class RouterAgent extends BaseAgent {
   constructor(
     private readonly agentRegistry: AgentRegistry,
     private readonly agentLogger: AgentLoggerService,
+    private readonly agentCatalog: AgentCatalogService,
+    private readonly patternService: PatternService,
+    private readonly mcpPlanService: McpPlanService,
   ) {
     super(
       'RouterAgent',
@@ -83,53 +89,149 @@ export class RouterAgent extends BaseAgent {
       rulesContext: this.formatRulesContext(allRules),
     };
 
-    // Detectar intención
-    const intention = this.detectIntention(request.input);
+    const sessionId: string | undefined = request.options?.sessionId;
+    const projectId: string | undefined = request.options?.projectId;
+    const rawInput: string = request.options?.rawInput ?? request.input;
+
+    // Detectar intención — usar rawInput (sin reglas prepended)
+    const intention = this.detectIntention(rawInput);
 
     this.agentLogger.info(
       this.agentId,
       `🧠 [ROUTER] Intención detectada: ${intention}`,
-      {
-        confidence: 'high',
-        inputPreview: request.input.substring(0, 50),
-      },
+      { inputPreview: rawInput.substring(0, 50) },
     );
 
-    // Encontrar agente especializado
-    const targetAgent = this.findSpecializedAgent(intention);
+    // ── CAPA 4: Confirmación / Rechazo de sugerencia pendiente ──────────────
+    if (intention === 'confirm-suggested' && sessionId) {
+      const pending = await this.patternService.consumePendingNext(sessionId);
+      if (pending) {
+        this.agentLogger.info(
+          this.agentId,
+          `✅ [ROUTER] Confirmando sugerencia: ${pending.agentId}`,
+        );
 
-    if (!targetAgent) {
-      this.agentLogger.warn(
-        this.agentId,
-        `⚠️ [ROUTER] No se encontró agente especializado para: ${intention}`,
-        {
-          availableAgents: this.agentRegistry.getAgentIds(),
-        },
-      );
+        if (projectId) {
+          await this.patternService.recordConfirmation(
+            projectId,
+            pending.fromAgentId,
+            pending.agentId,
+          );
+        }
 
-      // Si no hay agente especializado, devolver respuesta genérica
-      const nextAction: AgentAction = {
-        type: 'request_more_info',
-        action: 'clarify',
-        task: request.input,
-      };
+        const confirmedAgent = this.agentRegistry.getAgent(pending.agentId);
+        if (confirmedAgent) {
+          // Crear mcp_plan antes de ejecutar el agente confirmado
+          let planId: string | undefined;
+          if (sessionId && this.isTechnicalTask(pending.intention || 'code')) {
+            try {
+              const existingPlan =
+                await this.mcpPlanService.findBySession(sessionId);
+              if (!existingPlan) {
+                const title = this.buildPlanTitle(
+                  rawInput,
+                  pending.intention || 'code',
+                );
+                const plan = await this.mcpPlanService.create({
+                  title,
+                  projectId,
+                  sessionId,
+                  agentId: confirmedAgent.agentId,
+                  plan: {
+                    summary: `Confirmado por usuario: ${rawInput.substring(0, 300)}`,
+                    detectedIntention: pending.intention || 'code',
+                    steps: [
+                      {
+                        order: 1,
+                        description: `Ejecutar ${confirmedAgent.agentId}`,
+                        agentId: confirmedAgent.agentId,
+                        status: 'in_progress',
+                      },
+                    ],
+                    rulesApplied: allRules.map((r) => ({
+                      id: r.id,
+                      name: r.name,
+                      category: r.category,
+                    })),
+                    agentsInvolved: [confirmedAgent.agentId],
+                  },
+                });
+                planId = plan.id;
+              } else {
+                planId = existingPlan.id;
+              }
+            } catch (error) {
+              this.agentLogger.warn(
+                this.agentId,
+                `⚠️ No se pudo crear plan (confirmación): ${error.message}`,
+              );
+            }
+          }
 
+          // Registrar invocación y transición
+          if (sessionId && projectId) {
+            const lastAgent = await this.patternService.getLastAgent(sessionId);
+            this.agentCatalog
+              .recordInvocation(
+                confirmedAgent.agentId,
+                sessionId,
+                projectId,
+                rawInput,
+                `Confirmado por usuario → ${confirmedAgent.agentId}`,
+                allRules.map((r) => ({
+                  id: r.id,
+                  name: r.name,
+                  category: r.category,
+                })),
+              )
+              .catch(() => {});
+            this.patternService
+              .recordTransition(
+                projectId,
+                lastAgent,
+                confirmedAgent.agentId,
+                pending.intention || 'code',
+                rawInput,
+              )
+              .catch(() => {});
+            await this.patternService.setLastAgent(
+              sessionId,
+              confirmedAgent.agentId,
+            );
+          }
+
+          return this.buildRoutingResponse(
+            confirmedAgent.agentId,
+            pending.intention || intention,
+            allRules,
+            request,
+            null,
+            planId,
+          );
+        }
+      }
+      // Sin sugerencia pendiente → tratar como request genérico
+    }
+
+    if (intention === 'reject-suggested' && sessionId) {
+      const pending = await this.patternService.consumePendingNext(sessionId);
+      if (pending && projectId) {
+        await this.patternService.recordRejection(
+          projectId,
+          pending.fromAgentId,
+          pending.agentId,
+        );
+        this.agentLogger.info(
+          this.agentId,
+          `❌ [ROUTER] Sugerencia rechazada: ${pending.agentId}`,
+        );
+      }
       return {
         success: true,
         data: {
-          message:
-            "I understand you're asking about something. Could you be more specific? I can help you with:\n" +
-            '- Searching code rules (Clean Architecture, CQRS, NestJS)\n' +
-            '- Generating code\n' +
-            '- Explaining architecture patterns\n' +
-            '- Analyzing code quality\n' +
-            '- Product Management (creating issues, user stories)\n' +
-            '- Issue workflow tracking',
-          intention,
+          message: 'Entendido. ¿En qué quieres trabajar entonces?',
+          intention: 'clarify',
           targetAgent: this.agentId,
-          nextAction,
-          availableAgents: this.agentRegistry.getAgentIds(),
-          relevantRules: allRules.length > 0 ? allRules : undefined,
         },
         metadata: {
           agentId: this.agentId,
@@ -139,21 +241,163 @@ export class RouterAgent extends BaseAgent {
       };
     }
 
-    this.agentLogger.info(
-      this.agentId,
-      `🔀 [ROUTER] Enrutando a ${targetAgent.agentId}`,
-      {
-        from: this.agentId,
-        to: targetAgent.agentId,
-        intention,
-      },
-    );
+    // ── Routing normal ───────────────────────────────────────────────────────
+    const agentIdFromMap = this.findSpecializedAgentId(intention);
 
-    // NEW: Return nextAction instead of executing directly
-    // This allows Qwen to execute the agent with clean context
+    if (!agentIdFromMap) {
+      return {
+        success: true,
+        data: {
+          message:
+            '¿Podrías ser más específico? Puedo ayudarte con:\n' +
+            '- Generar código (NestJS, Angular)\n' +
+            '- Crear issues y user stories\n' +
+            '- Análisis de arquitectura\n' +
+            '- Historial del proyecto\n' +
+            '- Workflow de issues',
+          intention,
+          targetAgent: this.agentId,
+          availableAgents: this.agentRegistry.getAgentIds(),
+        },
+        metadata: {
+          agentId: this.agentId,
+          executionTime: 0,
+          timestamp: new Date(),
+        },
+      };
+    }
+
+    const targetAgent = this.agentRegistry.getAgent(agentIdFromMap);
+    if (!targetAgent) {
+      this.agentLogger.warn(
+        this.agentId,
+        `⚠️ Agente ${agentIdFromMap} no registrado`,
+      );
+      return {
+        success: true,
+        data: { message: `Agente ${agentIdFromMap} no disponible.`, intention },
+        metadata: {
+          agentId: this.agentId,
+          executionTime: 0,
+          timestamp: new Date(),
+        },
+      };
+    }
+
+    // ── CAPA 1: recordInvocation en agent_session_contexts ───────────────────
+    if (sessionId && projectId) {
+      const lastAgent = await this.patternService.getLastAgent(sessionId);
+      this.agentCatalog
+        .recordInvocation(
+          targetAgent.agentId,
+          sessionId,
+          projectId,
+          rawInput,
+          `Enrutado por RouterAgent → ${targetAgent.agentId}`,
+          allRules.map((r) => ({
+            id: r.id,
+            name: r.name,
+            category: r.category,
+          })),
+        )
+        .catch(() => {});
+
+      // ── CAPA 2: Registrar transición en agent_invocation_patterns ───────────
+      this.patternService
+        .recordTransition(
+          projectId,
+          lastAgent,
+          targetAgent.agentId,
+          intention,
+          rawInput,
+        )
+        .catch(() => {});
+
+      await this.patternService.setLastAgent(sessionId, targetAgent.agentId);
+    }
+
+    // ── CAPA 3: Calcular sugerencia de próximo paso ──────────────────────────
+    let suggestedNext: SuggestedNext | null = null;
+    if (projectId) {
+      suggestedNext = await this.patternService.getSuggestedNext(
+        projectId,
+        targetAgent.agentId,
+      );
+      if (suggestedNext && sessionId) {
+        await this.patternService.storePendingNext(
+          sessionId,
+          suggestedNext,
+          targetAgent.agentId,
+        );
+      }
+    }
+
+    // ── CAPA 5: Crear MCP Plan si es tarea técnica y no hay plan activo ──────
+    let activePlanId: string | undefined;
+    if (sessionId && this.isTechnicalTask(intention)) {
+      try {
+        const existing = sessionId
+          ? await this.mcpPlanService.findBySession(sessionId)
+          : null;
+        if (!existing) {
+          const title = this.buildPlanTitle(rawInput, intention);
+          const plan = await this.mcpPlanService.create({
+            title,
+            projectId,
+            sessionId,
+            agentId: targetAgent.agentId,
+            plan: {
+              summary: rawInput.substring(0, 300),
+              detectedIntention: intention,
+              steps: [
+                {
+                  order: 1,
+                  description: `Ejecutar ${targetAgent.agentId}`,
+                  agentId: targetAgent.agentId,
+                  status: 'in_progress',
+                },
+              ],
+              rulesApplied: allRules.map((r) => ({
+                id: r.id,
+                name: r.name,
+                category: r.category,
+              })),
+              agentsInvolved: [targetAgent.agentId],
+            },
+          });
+          activePlanId = plan.id;
+        } else {
+          activePlanId = existing.id;
+        }
+      } catch (error) {
+        this.agentLogger.warn(
+          this.agentId,
+          `⚠️ No se pudo crear plan (routing normal): ${error.message}`,
+        );
+      }
+    }
+
+    return this.buildRoutingResponse(
+      targetAgent.agentId,
+      intention,
+      allRules,
+      request,
+      suggestedNext,
+      activePlanId,
+    );
+  }
+
+  private buildRoutingResponse(
+    targetAgentId: string,
+    intention: string,
+    allRules: any[],
+    request: AgentRequest,
+    suggestedNext: SuggestedNext | null,
+    planId?: string,
+  ): AgentResponse {
     const nextAction = {
       type: 'execute_agent' as const,
-      agent: targetAgent.agentId,
+      agent: targetAgentId,
       action: 'execute',
       task: request.input,
       context: {
@@ -163,30 +407,41 @@ export class RouterAgent extends BaseAgent {
       },
     };
 
+    let message = `Entendido. Ejecutaré el agente **${targetAgentId}** para tu solicitud.`;
+
+    if (suggestedNext) {
+      const pct = Math.round(suggestedNext.confidence * 100);
+      message +=
+        `\n\n💡 **Sugerencia para después** (${pct}% confianza — ${suggestedNext.basedOn}):\n` +
+        `→ **${suggestedNext.action}** con \`${suggestedNext.agentId}\`\n` +
+        `_Responde "sí" cuando termines para ejecutarlo automáticamente._`;
+    }
+
+    const sessionId = request.options?.sessionId;
+    const projectId = request.options?.projectId;
+    const projectName = request.options?.projectName;
+
     this.agentLogger.info(
       this.agentId,
-      `📤 [ROUTER] Devolviendo nextAction para ${targetAgent.agentId}`,
-      {
-        nextActionType: nextAction.type,
-        hasRules: allRules.length > 0,
-      },
+      `🚦 [ROUTER] → ${targetAgentId} | intention:${intention} | project:${projectName ?? projectId ?? '-'} | session:${sessionId?.substring(0, 8) ?? '-'} | plan:${planId?.substring(0, 8) ?? '-'}`,
     );
 
-    // Return response WITH nextAction (not executed yet)
     return {
       success: true,
       data: {
-        message: `Entendido. Para completar tu solicitud, ejecutaré el agente ${targetAgent.agentId}.`,
-        targetAgent: targetAgent.agentId,
+        message,
+        targetAgent: targetAgentId,
         intention,
         nextAction,
+        planId,
+        suggestedNext: suggestedNext ?? undefined,
         relevantRules: allRules.length > 0 ? allRules : undefined,
         rulesContext:
           allRules.length > 0 ? this.formatRulesContext(allRules) : undefined,
       },
       metadata: {
         agentId: this.agentId,
-        executionTime: Date.now() - (request as any).startTime || 0,
+        executionTime: 0,
         timestamp: new Date(),
       },
     };
@@ -319,6 +574,93 @@ export class RouterAgent extends BaseAgent {
   private detectIntention(input: string): string {
     const lowerInput = input.toLowerCase();
 
+    // Confirmación de sugerencia pendiente — MÁXIMA PRIORIDAD
+    if (
+      this.matchesPattern(lowerInput, [
+        'sí',
+        'ok',
+        'okay',
+        'adelante',
+        'dale',
+        'procede',
+        'hazlo',
+        'confirmo',
+        'perfecto',
+        'correcto',
+        'exacto',
+        'venga',
+        'vamos',
+        'yes',
+        'proceed',
+        'go ahead',
+        'do it',
+        'continue',
+      ])
+    ) {
+      return 'confirm-suggested';
+    }
+
+    // Rechazo de sugerencia pendiente — MÁXIMA PRIORIDAD
+    if (
+      this.matchesPattern(lowerInput, [
+        'no',
+        'nope',
+        'no gracias',
+        'cancela',
+        'para',
+        'detente',
+        'otro',
+        'diferente',
+        'cambia',
+        'mejor no',
+        'skip',
+      ])
+    ) {
+      return 'reject-suggested';
+    }
+
+    // Actualización de contexto — ALTA PRIORIDAD (Claude reporta trabajo realizado)
+    if (
+      this.matchesPattern(lowerInput, [
+        'actualizar contexto',
+        'actualiza contexto',
+        'update context',
+        'contexto del proyecto',
+        'trabajo realizado',
+        'work done',
+        'pendiente:',
+        'sesión en ',
+        'backend (',
+        'frontend (',
+      ])
+    ) {
+      return 'context-update';
+    }
+
+    // Patrones de historial de proyecto - ALTA PRIORIDAD
+    if (
+      this.matchesPattern(lowerInput, [
+        'historial del proyecto',
+        'historial de este proyecto',
+        'dame el historial',
+        'qué se ha hecho',
+        'que se ha hecho',
+        'qué hemos trabajado',
+        'que hemos trabajado',
+        'resumen del proyecto',
+        'trabajo anterior',
+        'módulos trabajados',
+        'modulos trabajados',
+        'sessions anteriores',
+        'decisiones del proyecto',
+        'usa el mcp para cargar el historico',
+        'cargar el historico',
+        'historial de trabajo',
+      ])
+    ) {
+      return 'project-history';
+    }
+
     // Patrones de Context7 (documentación de librerías) - ALTA PRIORIDAD
     if (
       this.matchesPattern(lowerInput, [
@@ -337,12 +679,6 @@ export class RouterAgent extends BaseAgent {
         'properly use',
         'best practices for',
         'best practices',
-        'configure',
-        'configurar',
-        'setup',
-        'set up',
-        'implementar',
-        'implement',
       ])
     ) {
       return 'context7';
@@ -438,11 +774,30 @@ export class RouterAgent extends BaseAgent {
     if (
       this.matchesPattern(lowerInput, [
         'crear',
+        'crea',
         'generar',
+        'genera',
         'código',
         'implementar',
+        'implementa',
+        'implement',
         'escribe',
         'haz',
+        'agrega',
+        'agregar',
+        'añade',
+        'añadir',
+        'modifica',
+        'modificar',
+        'endpoint',
+        'service',
+        'servicio',
+        'componente',
+        'component',
+        'módulo',
+        'modulo',
+        'controller',
+        'controlador',
       ])
     ) {
       return 'code';
@@ -529,11 +884,23 @@ export class RouterAgent extends BaseAgent {
     return 'search';
   }
 
+  /** Devuelve el agentId del mapa (null si es sentinel __confirm__/__reject__ o no existe) */
+  private findSpecializedAgentId(intention: string): string | null {
+    const id = this.getAgentMap()[intention];
+    if (!id || id.startsWith('__')) return null;
+    return id;
+  }
+
   /**
    * Encuentra un agente especializado para la intención dada
    */
   private findSpecializedAgent(intention: string) {
-    const agentMap: Record<string, string> = {
+    const agentId = this.findSpecializedAgentId(intention);
+    return agentId ? this.agentRegistry.getAgent(agentId) : undefined;
+  }
+
+  private getAgentMap(): Record<string, string> {
+    return {
       search: 'SearchAgent',
       'web-search': 'WebSearchAgent',
       context7: 'Context7Agent',
@@ -548,15 +915,11 @@ export class RouterAgent extends BaseAgent {
       pm: 'PMAgent',
       github: 'GitHubAgent',
       git: 'GitHubAgent',
+      'project-history': 'ProjectHistoryAgent',
+      'context-update': 'ContextAgent',
+      'confirm-suggested': '__confirm__',
+      'reject-suggested': '__reject__',
     };
-
-    const targetAgentId = agentMap[intention];
-
-    if (!targetAgentId) {
-      return undefined;
-    }
-
-    return this.agentRegistry.getAgent(targetAgentId);
   }
 
   /**
@@ -564,6 +927,42 @@ export class RouterAgent extends BaseAgent {
    */
   private matchesPattern(input: string, patterns: string[]): boolean {
     return patterns.some((pattern) => input.includes(pattern));
+  }
+
+  /** Intenciones que representan tareas reales — gatillan creación de McpPlan */
+  private isTechnicalTask(intention: string): boolean {
+    return [
+      'code',
+      'analysis',
+      'architecture',
+      'frontend-architecture',
+      'issue-workflow',
+      'github',
+      'search',
+      'context',
+      'context7',
+      'pm',
+      'project-history',
+      'context-update',
+    ].includes(intention);
+  }
+
+  /** Genera un título legible para el plan a partir del input y la intención */
+  private buildPlanTitle(input: string, intention: string): string {
+    const intentionLabel: Record<string, string> = {
+      code: 'Implementación',
+      analysis: 'Análisis',
+      architecture: 'Arquitectura',
+      'frontend-architecture': 'Frontend',
+      'issue-workflow': 'Workflow',
+      github: 'GitHub',
+      search: 'Búsqueda',
+      context: 'Contexto',
+      context7: 'Docs',
+    };
+    const prefix = intentionLabel[intention] ?? 'Tarea';
+    const snippet = input.replace(/\s+/g, ' ').trim().substring(0, 80);
+    return `[${prefix}] ${snippet}`;
   }
 
   /**

@@ -110,6 +110,7 @@ export class McpInstallerService {
     }
 
     const serverConfig = {
+      type: 'sse',
       url: this.mcpServerUrl,
       autoApprove: [
         'search_rules',

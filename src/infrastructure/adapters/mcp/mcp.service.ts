@@ -232,6 +232,16 @@ Issue tracking is enabled for this session.`,
     const session: McpSession = { server, transport };
     this.sessions.set(transportSessionId, session);
 
+    // Heartbeat to keep SSE connection alive (prevents proxy/client timeouts)
+    const heartbeat = setInterval(() => {
+      try {
+        res.write(': ping\n\n');
+      } catch {
+        clearInterval(heartbeat);
+      }
+    }, 25000);
+    res.on('close', () => clearInterval(heartbeat));
+
     // Extract IP from clientId (format: "ip-::ffff:127.0.0.1-timestamp")
     const ipMatch = clientId?.match(/^ip-(.+?)(-\d+)?$/);
     const ipAddress = ipMatch ? ipMatch[1] : res.req?.ip || 'unknown';
@@ -422,66 +432,6 @@ Issue tracking is enabled for this session.`,
       `✅ MCP: Session ${existingSessionId ? 'REUSED' : 'CREATED'}: ${finalSessionId}`,
     );
 
-    // STEP 5: Create issue automatically for this session (for tracking work)
-    // IMPORTANT: Include projectId so issue is linked to project
-    try {
-      // Check if session already has an issue
-      const session =
-        await this.sessionRepository.findBySessionId(finalSessionId);
-
-      if (session && !session.issueId) {
-        // Use project name in title if available
-        const title = projectName
-          ? `Session ${projectName} - ${new Date().toISOString().substring(0, 10)}`
-          : `MCP Session - ${ipAddress} - ${new Date().toISOString().substring(0, 10)}`;
-
-        const issue = await this.issueService.createIssue({
-          title,
-          description: `Auto-created issue for MCP session. Session started from IP: ${ipAddress}${projectName ? ` | Project: ${projectName}` : ''}`,
-          userId,
-          sessionId: finalSessionId,
-          projectId: projectId || undefined, // ← LINK ISSUE TO PROJECT
-          metadata: {
-            autoCreated: true,
-            source: 'mcp-session-init',
-            clientIp: ipAddress,
-            clientId,
-            createdAt: new Date().toISOString(),
-            projectName: projectName || undefined,
-          },
-        });
-
-        // Link issue to session
-        await this.sessionRepository
-          .getRepository()
-          .update({ sessionId: finalSessionId }, { issueId: issue.id });
-
-        // Store in Redis
-        await this.redisService.set(
-          `session:${finalSessionId}:issueId`,
-          issue.id,
-          86400,
-        );
-
-        this.logger.log(
-          `✅ Issue auto-created for session: ${issue.id} (${issue.issueId}) - title: "${title}"${projectId ? ` | Project: ${projectName}` : ''}`,
-        );
-      } else if (session?.issueId) {
-        // Restore issue mapping to Redis
-        await this.redisService.set(
-          `session:${finalSessionId}:issueId`,
-          session.issueId,
-          86400,
-        );
-        this.logger.log(
-          `♻️ Issue already exists for session: ${session.issueId}`,
-        );
-      }
-    } catch (error) {
-      this.logger.error(`Error creating issue for session: ${error.message}`);
-      // Don't fail session creation if issue creation fails
-    }
-
     // Cleanup when connection closes
     res.on('close', () => {
       this.closeSession(transportSessionId);
@@ -574,21 +524,11 @@ Issue tracking is enabled for this session.`,
         );
       }
 
-      // AUTO-CREATE ISSUE on first user message
-      let issueId: string | null = null;
-      if (role === MessageRole.USER && userId) {
-        issueId = await this.getOrCreateIssueForSession(
-          sessionId,
-          userId,
-          content,
-        );
-      }
-
       await this.sessionRepository.addMessage({
         sessionId,
         role,
         content,
-        issueId: issueId || metadata?.issueId || null,
+        issueId: metadata?.issueId || null,
         metadata,
         tokenCount: content.length,
       });
@@ -628,12 +568,17 @@ Issue tracking is enabled for this session.`,
       let projectName: string | null = null;
 
       if (existingProjectId) {
-        const existingProject = await this.projectsService.findById(existingProjectId);
+        const existingProject =
+          await this.projectsService.findById(existingProjectId);
         projectName = existingProject?.name || null;
-        this.logger.log(`📁 Using provided project: ${projectName} (${existingProjectId})`);
+        this.logger.log(
+          `📁 Using provided project: ${projectName} (${existingProjectId})`,
+        );
       } else {
         projectName = await this.detectProjectName(userMessage);
-        this.logger.log(`🔍 Detected project from message: ${projectName || 'unknown'}`);
+        this.logger.log(
+          `🔍 Detected project from message: ${projectName || 'unknown'}`,
+        );
       }
 
       // STEP 2: Check if session already has an issue linked
@@ -1196,7 +1141,7 @@ When in doubt, ALWAYS use the agent_query tool first.`,
     // agent_query - MAIN TOOL! MUST be used for ALL questions and work requests
     server.tool(
       'agent_query',
-      'MUST USE for ALL questions, work requests, code analysis, implementation, and research. Routes to specialized agents (PM, Code, Architecture, Analysis, GitHub). ALWAYS creates issues for any work task (implement, analyze, create, fix, build, research). Returns contextual responses with code rules from the project.',
+      'OBLIGATORIO antes de cualquier implementación. Registra el plan de trabajo en BD, carga reglas del proyecto y enruta al agente especializado (CodeAgent, ArchitectureAgent, AnalysisAgent, etc.). Devuelve guía de implementación basada en las reglas reales del proyecto. NUNCA implementes código sin llamar este tool primero — el MCP necesita registrar el plan para mantener historial del proyecto.',
       {
         message: z.string().describe('Your question or request'),
         context: z
@@ -1210,7 +1155,9 @@ When in doubt, ALWAYS use the agent_query tool first.`,
         projectPath: z
           .string()
           .optional()
-          .describe('Absolute path to the current project (e.g., /home/user/projects/my-app). ALWAYS include this when you know the project path.'),
+          .describe(
+            'Absolute path to the current project (e.g., /home/user/projects/my-app). ALWAYS include this when you know the project path.',
+          ),
       },
       async ({ message, context, sessionId, projectPath }, extra) => {
         // Try multiple sources for sessionId: parameter, extra
@@ -1239,47 +1186,43 @@ When in doubt, ALWAYS use the agent_query tool first.`,
           const result = await response.json();
 
           if (result.success) {
+            // /mcp/chat wraps RouterAgent response: result.data.data = RouterAgent data
+            const inner = result.data?.data ?? result.data ?? {};
+            const agentName = inner.agentExecuted || inner.targetAgent || null;
             this.logger.log(
-              `✅ MCP: Agent responded - ${result.data?.targetAgent || 'unknown'}`,
+              `✅ MCP: Agent responded - ${agentName || 'router-only'}`,
             );
 
             // Format response with agent info
             let text = '';
 
-            if (result.data?.targetAgent) {
-              text += `🤖 **${result.data.targetAgent}** te ayuda:\n\n`;
+            if (agentName) {
+              text += `🤖 **${agentName}**\n\n`;
             }
 
-            if (result.data?.message) {
-              text += result.data.message;
+            if (inner.message) {
+              text += inner.message;
             }
 
-            // Add routed agent info
-            if (result.data?.routedBy && result.data?.targetAgent) {
-              text += `\n\n---\n*Enrutado por: ${result.data.routedBy} → ${result.data.targetAgent}*`;
+            // Plan info — always explicit, never implied
+            if (inner.planId) {
+              text += `\n\n📋 **Plan registrado en MCP**\n`;
+              text += `ID: \`${inner.planId}\`\n`;
+              text += `Agente: ${agentName || 'RouterAgent'}\n`;
+            } else {
+              text += `\n\n⚠️ **Sin plan registrado** — este mensaje no creó un mcp_plan. Llama agent_query con una tarea técnica específica para registrar el plan.`;
             }
 
-            // Add issue info if created
-            if (result.data?.issue) {
-              const issue = result.data.issue;
-              text += `\n\n📋 **Issue creado:** ${issue.title || issue.id || 'N/A'}\n`;
-              if (issue.id) text += `ID: ${issue.id}\n`;
-            }
-
-            // Add relevant rules if any
-            if (
-              result.data?.relevantRules &&
-              result.data.relevantRules.length > 0
-            ) {
-              text += `\n\n📚 **Reglas aplicadas:** ${result.data.relevantRules.length}\n`;
-              result.data.relevantRules.forEach((r: any, i: number) => {
+            // Rules applied
+            if (inner.relevantRules?.length > 0) {
+              text += `\n\n📚 **Reglas aplicadas (${inner.relevantRules.length}):**\n`;
+              inner.relevantRules.forEach((r: any, i: number) => {
                 text += `\n${i + 1}. ${r.name} (${r.category})`;
               });
             }
 
-            // Add metadata
             if (result.metadata?.executionTime) {
-              text += `\n\n⏱️ Tiempo: ${result.metadata.executionTime}ms`;
+              text += `\n\n⏱️ ${result.metadata.executionTime}ms`;
             }
 
             return { content: [{ type: 'text' as const, text }] };
@@ -1816,13 +1759,23 @@ When in doubt, ALWAYS use the agent_query tool first.`,
       'context7_docs',
       'Fetches up-to-date, version-specific documentation and code examples for libraries using Context7. Use when user asks about library docs, API usage, or how to use a framework.',
       {
-        library: z.string().describe('Library name or ID (e.g., "Next.js" or "/vercel/next.js")'),
-        query: z.string().describe('What you need help with (e.g., "middleware authentication", "setup")'),
+        library: z
+          .string()
+          .describe(
+            'Library name or ID (e.g., "Next.js" or "/vercel/next.js")',
+          ),
+        query: z
+          .string()
+          .describe(
+            'What you need help with (e.g., "middleware authentication", "setup")',
+          ),
       },
       async ({ library, query }, extra) => {
         const sessionId = extra?.sessionId || 'unknown';
 
-        this.logger.log(`📚 MCP: context7_docs - library="${library}", query="${query}"`);
+        this.logger.log(
+          `📚 MCP: context7_docs - library="${library}", query="${query}"`,
+        );
 
         try {
           let result;
@@ -1863,11 +1816,38 @@ When in doubt, ALWAYS use the agent_query tool first.`,
     // register_project - Register current project with MCP system
     server.tool(
       'register_project',
-      'Registers the current project with the MCP system. Detects framework, language, and creates/links project to the current session. ALWAYS call this when starting work on a new project.',
+      'Registers the current project with the MCP system. Detects framework, language, and creates/links project to the current session. ALWAYS call this when starting work on a new project. Use relatedProjects to declare cross-project relationships (gateway→portal, portal→controlserver, etc.).',
       {
-        projectPath: z.string().describe('Absolute path to the project (e.g., /home/user/projects/my-app)'),
+        projectPath: z
+          .string()
+          .describe(
+            'Absolute path to the project (e.g., /home/user/projects/my-app)',
+          ),
+        relatedProjects: z
+          .array(
+            z.object({
+              projectPath: z
+                .string()
+                .optional()
+                .describe('Absolute path of the related project'),
+              projectId: z
+                .string()
+                .optional()
+                .describe('ID of already-registered related project'),
+              type: z
+                .enum(['grpc_client', 'depends_on', 'calls', 'shared_db'])
+                .optional()
+                .describe('Relationship type (default: depends_on)'),
+              description: z
+                .string()
+                .optional()
+                .describe('Human-readable description of the relationship'),
+            }),
+          )
+          .optional()
+          .describe('Other projects this project depends on or calls'),
       },
-      async ({ projectPath }, extra) => {
+      async ({ projectPath, relatedProjects }, extra) => {
         const sessionId = extra?.sessionId || 'unknown';
 
         this.logger.log(`📁 MCP: register_project - path="${projectPath}"`);
@@ -1878,7 +1858,7 @@ When in doubt, ALWAYS use the agent_query tool first.`,
             {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ projectPath, sessionId }),
+              body: JSON.stringify({ projectPath, sessionId, relatedProjects }),
             },
           );
 
@@ -1892,18 +1872,292 @@ When in doubt, ALWAYS use the agent_query tool first.`,
             text += `- **Path**: \`${result.project.path}\`\n`;
             text += `- **ID**: \`${result.project.id}\`\n`;
 
+            if (result.linkedRelationships?.length) {
+              text += `\n🔗 **Linked Projects** (${result.linkedRelationships.length}):\n`;
+              for (const r of result.linkedRelationships) {
+                text += `  - \`${r.name}\` via \`${r.type}\`\n`;
+              }
+            }
+
             return { content: [{ type: 'text' as const, text }] };
           } else {
             return {
-              content: [
-                { type: 'text' as const, text: `⚠️ ${result.error}` },
-              ],
+              content: [{ type: 'text' as const, text: `⚠️ ${result.error}` }],
               isError: true,
             };
           }
         } catch (error) {
           const msg = error instanceof Error ? error.message : 'Error';
           this.logger.error(`❌ MCP: register_project failed - ${msg}`);
+          return {
+            content: [{ type: 'text' as const, text: `❌ Error: ${msg}` }],
+            isError: true,
+          };
+        }
+      },
+    );
+
+    // session_init_auto — auto-init al arrancar Claude Code
+    server.tool(
+      'session_init_auto',
+      'Inicialización de sesión. Devuelve JSON con sessionId, projectId, catálogo de agentes, planes activos (activePlans) y resumen de trabajo pendiente (pendingWorkSummary). Si activePlans tiene contenido: presentarlo y esperar instrucción del usuario sin ejecutar más herramientas. Si activePlans está vacío: usar git log y git status para mostrar el estado actual del código. NUNCA llamar read_github_issue ni list_github_issues de forma autónoma.',
+      {
+        cwd: z
+          .string()
+          .describe(
+            'Directorio de trabajo actual del agente (process.cwd()). Requerido.',
+          ),
+        clientId: z
+          .string()
+          .optional()
+          .describe('Identificador único del cliente MCP'),
+        userAgent: z
+          .string()
+          .optional()
+          .describe('Nombre del cliente (ej: claude-code, qwen)'),
+      },
+      async ({ cwd, clientId, userAgent }, extra) => {
+        this.logger.log(`🚀 MCP: session_init_auto - cwd="${cwd}"`);
+
+        try {
+          const response = await fetch(
+            `http://localhost:${this.apiPort}/mcp/session/init-auto`,
+            {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ cwd, clientId, userAgent }),
+            },
+          );
+
+          if (!response.ok) {
+            throw new Error(`HTTP ${response.status}`);
+          }
+
+          const data = await response.json();
+
+          // Persist sessionId for pre-write hook
+          if (data.sessionId) {
+            const fs = await import('fs/promises');
+            await fs
+              .writeFile('/tmp/.mcp-session', data.sessionId, 'utf-8')
+              .catch(() => {});
+          }
+
+          // Devolver JSON estructurado para que el CLI pueda parsear
+          return {
+            content: [
+              { type: 'text' as const, text: JSON.stringify(data, null, 2) },
+            ],
+          };
+        } catch (error) {
+          const msg = error instanceof Error ? error.message : 'Error';
+          this.logger.error(`❌ MCP: session_init_auto failed - ${msg}`);
+          return {
+            content: [
+              {
+                type: 'text' as const,
+                text: `❌ Error en session_init_auto: ${msg}`,
+              },
+            ],
+            isError: true,
+          };
+        }
+      },
+    );
+
+    // link_project_relation — vincula dos proyectos entre sí
+    server.tool(
+      'link_project_relation',
+      'Vincula dos proyectos registrados en el MCP. Úsalo cuando el usuario mencione que un proyecto depende de otro o se integra con él (frontend/backend, microservicios, etc.). Registra la relación en BD y la incluye en el contexto de sesiones futuras.',
+      {
+        sourceProjectPath: z
+          .string()
+          .describe('Path local del proyecto fuente (el actual)'),
+        targetProjectPath: z
+          .string()
+          .describe('Path local del proyecto relacionado'),
+        type: z
+          .enum(['depends_on', 'calls', 'grpc_client', 'shared_db'])
+          .optional()
+          .describe('Tipo de relación'),
+        description: z
+          .string()
+          .optional()
+          .describe('Descripción de la relación'),
+      },
+      async ({ sourceProjectPath, targetProjectPath, type, description }) => {
+        try {
+          const port = this.apiPort;
+          const response = await fetch(
+            `http://localhost:${port}/mcp/projects/link`,
+            {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                sourceProjectPath,
+                targetProjectPath,
+                type,
+                description,
+              }),
+            },
+          );
+          const data = await response.json();
+          return {
+            content: [{ type: 'text' as const, text: JSON.stringify(data) }],
+          };
+        } catch (error) {
+          return {
+            content: [
+              { type: 'text' as const, text: `❌ Error: ${error.message}` },
+            ],
+            isError: true,
+          };
+        }
+      },
+    );
+
+    // register_plan — crea un plan de trabajo en BD explícitamente
+    server.tool(
+      'register_plan',
+      'Crea un plan de trabajo en la base de datos explícitamente. Útil para registrar intenciones de trabajo, tareas técnicas o issues que se van a implementar. Similar al flujo de agent_query pero sin ejecutar agentes. Requiere al menos title y projectPath o sessionId.',
+      {
+        title: z.string().describe('Título descriptivo del plan (obligatorio)'),
+        summary: z.string().optional().describe('Resumen detallado del plan'),
+        projectPath: z
+          .string()
+          .optional()
+          .describe('Path al proyecto (opcional si se da sessionId)'),
+        sessionId: z
+          .string()
+          .optional()
+          .describe('ID de sesión MCP (opcional si se da projectPath)'),
+        intention: z
+          .string()
+          .optional()
+          .describe(
+            'Intención detectada (code, analysis, pm, architecture, etc.)',
+          ),
+        agentId: z.string().optional().describe('Agente responsable del plan'),
+      },
+      async (
+        { title, summary, projectPath, sessionId, intention, agentId },
+        extra,
+      ) => {
+        const sid = sessionId || extra?.sessionId || 'unknown';
+        this.logger.log(
+          `📋 MCP: register_plan - title="${title.substring(0, 80)}"`,
+        );
+
+        try {
+          const body: Record<string, any> = { title };
+          if (summary) body.summary = summary;
+          if (projectPath) body.projectPath = projectPath;
+          if (sid) body.sessionId = sid;
+          if (intention) body.intention = intention;
+          if (agentId) body.agentId = agentId;
+
+          const response = await fetch(
+            `http://localhost:${this.apiPort}/mcp/plans/create`,
+            {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(body),
+            },
+          );
+
+          if (!response.ok) {
+            throw new Error(`HTTP ${response.status}`);
+          }
+
+          const planData = await response.json();
+          if (!planData.success) {
+            return {
+              content: [
+                {
+                  type: 'text' as const,
+                  text: `⚠️ No se pudo crear el plan: ${planData.error || 'error desconocido'}`,
+                },
+              ],
+              isError: true,
+            };
+          }
+
+          let text = `📋 **Plan registrado exitosamente**\n\n`;
+          text += `**ID**: \`${planData.data.id}\`\n`;
+          text += `**Título**: ${planData.data.title}\n`;
+          text += `**Estado**: ${planData.data.status}\n\n`;
+          text += `El plan ha sido guardado en la base de datos. Puedes consultarlo con \`list_plans\`.`;
+
+          return { content: [{ type: 'text' as const, text }] };
+        } catch (error) {
+          const msg = error instanceof Error ? error.message : 'Error';
+          this.logger.error(`❌ MCP: register_plan failed - ${msg}`);
+          return {
+            content: [{ type: 'text' as const, text: `❌ Error: ${msg}` }],
+            isError: true,
+          };
+        }
+      },
+    );
+
+    // list_plans — consulta planes activos
+    server.tool(
+      'list_plans',
+      'Lista los planes activos para una sesión o proyecto. Si se da sessionId, devuelve el plan activo. Si se da projectId, devuelve todos los planes.',
+      {
+        sessionId: z.string().optional().describe('ID de sesión'),
+        projectId: z.string().optional().describe('ID de proyecto'),
+        status: z
+          .string()
+          .optional()
+          .describe(
+            'Filtrar por estado (open, in_progress, completed, abandoned)',
+          ),
+      },
+      async ({ sessionId, projectId, status }) => {
+        this.logger.log(
+          `📋 MCP: list_plans - sessionId="${sessionId || '-'}" projectId="${projectId || '-'}"`,
+        );
+
+        try {
+          const qs = new URLSearchParams();
+          if (sessionId) qs.set('sessionId', sessionId);
+          if (projectId) qs.set('projectId', projectId);
+          if (status) qs.set('status', status);
+
+          const response = await fetch(
+            `http://localhost:${this.apiPort}/mcp/plans?${qs.toString()}`,
+          );
+
+          if (!response.ok) {
+            throw new Error(`HTTP ${response.status}`);
+          }
+
+          const plansData = await response.json();
+          const plans: any[] = plansData.data || [];
+
+          if (plans.length === 0) {
+            const noPlansMsg =
+              'No hay planes registrados para los criterios especificados.';
+            return { content: [{ type: 'text' as const, text: noPlansMsg }] };
+          }
+
+          let text = `📋 **Planes encontrados** (${plans.length}):\n\n`;
+          plans.forEach((p: any, i: number) => {
+            const planInfo = p.plan || {};
+            text += `${i + 1}. **${p.title}**\n`;
+            text += `   ID: \`${p.id}\` | Estado: ${p.status}\n`;
+            text += `   Agente: ${p.agentId || '-'} | Sesión: ${p.sessionId || '-'}\n`;
+            if (planInfo.detectedIntention) {
+              text += `   Intención: ${planInfo.detectedIntention}\n`;
+            }
+            text += `   Creado: ${new Date(p.createdAt).toLocaleString()}\n\n`;
+          });
+
+          return { content: [{ type: 'text' as const, text: text.trim() }] };
+        } catch (error) {
+          const msg = error instanceof Error ? error.message : 'Error';
+          this.logger.error(`❌ MCP: list_plans failed - ${msg}`);
           return {
             content: [{ type: 'text' as const, text: `❌ Error: ${msg}` }],
             isError: true,
@@ -1998,7 +2252,9 @@ When in doubt, ALWAYS use the agent_query tool first.`,
       return 'TypeScript';
     }
 
-    const hasTs = packageJson.dependencies?.['typescript'] || packageJson.devDependencies?.['typescript'];
+    const hasTs =
+      packageJson.dependencies?.['typescript'] ||
+      packageJson.devDependencies?.['typescript'];
     if (hasTs) return 'TypeScript';
 
     return 'JavaScript';

@@ -80,6 +80,14 @@ export class SessionRepository implements ISessionRepository {
   /**
    * Find sessions by user ID
    */
+  async findByProjectId(projectId: string, limit = 10): Promise<Session[]> {
+    return this.repository.find({
+      where: { projectId },
+      order: { lastActivityAt: 'DESC' },
+      take: limit,
+    });
+  }
+
   async findByUserId(userId: string, limit = 50): Promise<Session[]> {
     return this.repository.find({
       where: { userId, status: SessionStatus.ACTIVE },

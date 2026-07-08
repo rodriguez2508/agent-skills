@@ -17,6 +17,7 @@ import { HealthController } from '@presentation/controllers/health/health.contro
 import { RulesController } from '@presentation/controllers/rules/rules.controller';
 import { McpController } from '@presentation/controllers/mcp/mcp.controller';
 import { AgentsController } from '@presentation/controllers/agents/agents.controller';
+import { SessionsController } from '@presentation/controllers/sessions/sessions.controller';
 import { TaskBridgeController } from '@presentation/controllers/task-bridge/task-bridge.controller';
 
 // Application Handlers (CQRS)
@@ -46,7 +47,10 @@ import { Context7Agent } from '@agents/context7/context7.agent';
 import { Context7AgentModule } from '@agents/context7/context7.module';
 import { Context7Module as InfrastructureContext7Module } from '@infrastructure/adapters/context7/context7.module';
 import { ContextAgent } from '@agents/context/context.agent';
+import { ProjectHistoryAgent } from '@agents/history/project-history.agent';
 import { RedisIssueContextService } from '@infrastructure/cache/redis-issue-context.service';
+import { AgentCatalogService } from '@modules/agents/application/services/agent-catalog.service';
+import { PatternService } from '@modules/agents/application/services/pattern.service';
 
 // Domain
 import { RULE_REPOSITORY } from '@core/domain/ports/rule-repository.token';
@@ -58,6 +62,7 @@ import { SessionsModule } from '@modules/sessions/sessions.module';
 import { IssuesModule } from '@modules/issues/issues.module';
 import { ProjectsModule } from '@modules/projects/projects.module';
 import { ContextsModule } from '@modules/contexts/contexts.module';
+import { PlansModule } from '@modules/plans/plans.module';
 import { AuthController } from '@modules/auth/presentation/controllers/auth.controller';
 
 // Middleware
@@ -88,6 +93,7 @@ import { AgentsModule } from '@modules/agents/agents.module';
     IssuesModule,
     ProjectsModule,
     ContextsModule,
+    PlansModule,
     FrontendArchitectureModule,
     WebSearchModule,
     Context7AgentModule,
@@ -102,6 +108,7 @@ import { AgentsModule } from '@modules/agents/agents.module';
     McpController,
     AuthController,
     AgentsController,
+    SessionsController,
     TaskBridgeController,
   ],
   providers: [
@@ -135,9 +142,12 @@ import { AgentsModule } from '@modules/agents/agents.module';
     WebSearchAgent,
     Context7Agent,
     ContextAgent,
+    ProjectHistoryAgent,
 
     // Services
     RedisIssueContextService,
+    AgentCatalogService,
+    PatternService,
 
     // CQRS Handlers
     SearchRulesHandler,
@@ -166,6 +176,7 @@ export class AppModule implements OnModuleInit {
     private readonly webSearchAgent: WebSearchAgent,
     private readonly context7Agent: Context7Agent,
     private readonly contextAgent: ContextAgent,
+    private readonly projectHistoryAgent: ProjectHistoryAgent,
     private readonly rulesEngine: RulesEngine,
   ) {}
 
@@ -188,6 +199,7 @@ export class AppModule implements OnModuleInit {
     this.agentRegistry.register(this.webSearchAgent);
     this.agentRegistry.register(this.context7Agent);
     this.agentRegistry.register(this.contextAgent);
+    this.agentRegistry.register(this.projectHistoryAgent);
 
     // Register agents in the router
     this.routerAgent.registerAllAgents();

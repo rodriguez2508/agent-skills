@@ -9,10 +9,13 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { Context } from './domain/entities/context.entity';
 import { ContextRepository } from './infrastructure/persistence/context.repository';
 import { ContextService } from './application/services/context.service';
+import { ContextNodeService } from './application/services/context-node.service';
+import { ChatMessage } from '@modules/sessions/domain/entities/chat-message.entity';
+import { Session } from '@modules/sessions/domain/entities/session.entity';
 
 @Module({
-  imports: [TypeOrmModule.forFeature([Context])],
-  providers: [ContextRepository, ContextService],
-  exports: [ContextRepository, ContextService],
+  imports: [TypeOrmModule.forFeature([Context, ChatMessage, Session])],
+  providers: [ContextRepository, ContextService, ContextNodeService],
+  exports: [ContextRepository, ContextService, ContextNodeService],
 })
 export class ContextsModule {}

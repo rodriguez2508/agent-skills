@@ -9,10 +9,14 @@ import { MCPStrategy } from '@modules/agents/domain/value-objects/mcp-strategy.v
  * Adapter for Claude Code CLI agent.
  *
  * Config structure:
+ *   ~/
+ *   └── .claude.json       ← MCP servers (top-level mcpServers key)
  *   ~/.claude/
  *   ├── CLAUDE.md          ← System prompt (appended)
  *   ├── commands/          ← Skills as slash commands (.md files)
- *   └── settings.json      ← Settings + mcpServers (merged)
+ *   └── settings.json      ← UI/theme settings (NOT used for MCP)
+ *
+ * Claude Code reads mcpServers from ~/.claude.json, not ~/.claude/settings.json.
  */
 @Injectable()
 export class ClaudeAgentAdapter extends BaseAgentAdapter {
@@ -37,7 +41,8 @@ export class ClaudeAgentAdapter extends BaseAgentAdapter {
   }
 
   settingsPath(homeDir: string): string {
-    return path.join(homeDir, '.claude', 'settings.json');
+    // ~/.claude.json is the primary config file Claude Code reads for mcpServers
+    return path.join(homeDir, '.claude.json');
   }
 
   systemPromptStrategy(): SystemPromptStrategy {
@@ -45,7 +50,7 @@ export class ClaudeAgentAdapter extends BaseAgentAdapter {
   }
 
   mcpStrategy(): MCPStrategy {
-    // Claude Code stores MCP servers under mcpServers key in settings.json
+    // Claude Code stores MCP servers under top-level mcpServers key in ~/.claude.json
     return MCPStrategy.MergeIntoSettings;
   }
 

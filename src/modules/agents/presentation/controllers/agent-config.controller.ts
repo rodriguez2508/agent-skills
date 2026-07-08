@@ -2,6 +2,7 @@ import { Controller, Get, Post, Body, Param, Logger } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse } from '@nestjs/swagger';
 import { AgentConfigRegistryService } from '@infrastructure/adapters/agent-config/agent-config-registry.service';
 import { InstallService } from '@modules/agents/application/services/install.service';
+import { ClaudeMdUpdaterService } from '@modules/agents/application/services/claude-md-updater.service';
 import { InstallAgentDto } from '../dto/install-agent.dto';
 import { SyncAgentDto } from '../dto/sync-agent.dto';
 import { DetectionResponseDto } from '../dto/detection-response.dto';
@@ -20,6 +21,7 @@ export class AgentConfigController {
   constructor(
     private readonly registry: AgentConfigRegistryService,
     private readonly installService: InstallService,
+    private readonly claudeMdUpdater: ClaudeMdUpdaterService,
   ) {}
 
   @Get('agents')
@@ -103,5 +105,20 @@ export class AgentConfigController {
       { id: 'minimal', name: 'Minimal' },
       { id: 'custom', name: 'Custom' },
     ];
+  }
+
+  @Post('update-claude-md')
+  @ApiOperation({ summary: 'Actualiza la sección gentle-ai en ~/.claude/CLAUDE.md preservando contenido del usuario' })
+  async updateClaudeMd(
+    @Body() body: { targetPath?: string } = {},
+  ): Promise<{ success: boolean; result?: any; error?: string }> {
+    try {
+      const result = await this.claudeMdUpdater.update(body.targetPath);
+      this.logger.log(`✅ CLAUDE.md updated via API | ${result.path}`);
+      return { success: true, result };
+    } catch (error) {
+      this.logger.error(`❌ Failed to update CLAUDE.md: ${error.message}`);
+      return { success: false, error: error.message };
+    }
   }
 }

@@ -38,7 +38,8 @@
     "agent:setup-gemini": "node scripts/setup-gemini-mcp.js",
     "agent:setup-gemini:force": "node scripts/setup-gemini-mcp.js --force",
     "agent:execute-skill": "node scripts/agent-cli.js execute-skill",
-    "agent:redirect": "node scripts/agent-cli.js redirect"
+    "agent:redirect": "node scripts/agent-cli.js redirect",
+    "mcp:update-claude": "node scripts/update-claude-md.js"
   },
   "dependencies": {
     "@grpc/grpc-js": "^1.12.5",

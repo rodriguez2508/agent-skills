@@ -1,4 +1,13 @@
 import { Module, OnModuleInit, Logger } from '@nestjs/common';
+import { TypeOrmModule } from '@nestjs/typeorm';
+import { DatabaseModule } from '@infrastructure/database/database.module';
+import { AgentCategory } from '@modules/agents/domain/entities/agent-category.entity';
+import { AgentCatalog } from '@modules/agents/domain/entities/agent-catalog.entity';
+import { AgentSessionContext } from '@modules/agents/domain/entities/agent-session-context.entity';
+import { AgentCatalogService } from '@modules/agents/application/services/agent-catalog.service';
+import { AgentCatalogSeederService } from '@modules/agents/application/services/agent-catalog-seeder.service';
+import { PatternService } from '@modules/agents/application/services/pattern.service';
+import { AgentInvocationPattern } from '@modules/agents/domain/entities/agent-invocation-pattern.entity';
 import { FileMergeService } from '@infrastructure/file-merge/file-merge.service';
 import { AssetLoaderService } from '@infrastructure/assets/asset-loader.service';
 import { SystemService } from '@infrastructure/system/system.service';
@@ -12,6 +21,7 @@ import { McpInstallerService } from '@modules/agents/application/services/mcp-in
 import { PersonaInstallerService } from '@modules/agents/application/services/persona-installer.service';
 import { InstallService } from '@modules/agents/application/services/install.service';
 import { BackupService } from '@modules/agents/application/services/backup.service';
+import { ClaudeMdUpdaterService } from '@modules/agents/application/services/claude-md-updater.service';
 import { AgentConfigController } from '@modules/agents/presentation/controllers/agent-config.controller';
 
 /**
@@ -28,7 +38,10 @@ import { AgentConfigController } from '@modules/agents/presentation/controllers/
  * under a separate domain: "agent-config" vs "ai-agents".
  */
 @Module({
-  imports: [],
+  imports: [
+    TypeOrmModule.forFeature([AgentCategory, AgentCatalog, AgentSessionContext, AgentInvocationPattern]),
+    DatabaseModule,
+  ],
   controllers: [AgentConfigController],
   providers: [
     // Infrastructure
@@ -51,6 +64,12 @@ import { AgentConfigController } from '@modules/agents/presentation/controllers/
     // Orchestration
     InstallService,
     BackupService,
+    ClaudeMdUpdaterService,
+
+    // Agent Catalog (BM2)
+    AgentCatalogService,
+    AgentCatalogSeederService,
+    PatternService,
   ],
   exports: [
     AgentConfigRegistryService,
@@ -59,6 +78,10 @@ import { AgentConfigController } from '@modules/agents/presentation/controllers/
     SystemService,
     FileMergeService,
     AssetLoaderService,
+    AgentCatalogService,
+    PatternService,
+    ClaudeMdUpdaterService,
+    TypeOrmModule,
   ],
 })
 export class AgentsModule implements OnModuleInit {

@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Project } from '@modules/projects/domain/entities/project.entity';
+import { ProjectRelationship, ProjectRelationType } from '@modules/projects/domain/entities/project-relationship.entity';
 import * as fs from 'fs/promises';
 import * as path from 'path';
 
@@ -31,6 +32,8 @@ export class ProjectsService {
   constructor(
     @InjectRepository(Project)
     private readonly projectRepository: Repository<Project>,
+    @InjectRepository(ProjectRelationship)
+    private readonly relationshipRepository: Repository<ProjectRelationship>,
   ) {}
 
   /**
@@ -77,29 +80,47 @@ export class ProjectsService {
       where: { name: projectName, userId },
     });
 
+    const detection = projectPath
+      ? await this.detectFromPath(projectPath)
+      : null;
+    const folderName = projectPath ? path.basename(projectPath) : undefined;
+    const localPath = projectPath || undefined;
+
+    const buildMetadata = (current?: Project['metadata']): Project['metadata'] => ({
+      ...(current || {}),
+      ...(detection
+        ? {
+            language: this.detectLanguage(detection),
+            framework: detection.detectedFramework,
+            architecture: detection.detectedArchitecture,
+          }
+        : {}),
+      ...(folderName ? { folderName } : {}),
+      ...(localPath ? { localPath } : {}),
+      lastAnalyzedAt: new Date().toISOString(),
+    });
+
     if (!project) {
       project = this.projectRepository.create({
         name: projectName,
         userId,
         isActive: true,
         defaultBranch: 'main',
+        metadata: buildMetadata(),
       });
-
-      // Si hay path, detectar metadata
-      if (projectPath) {
-        const detection = await this.detectFromPath(projectPath);
-        if (detection) {
-          project.metadata = {
-            language: this.detectLanguage(detection),
-            framework: detection.detectedFramework,
-            lastAnalyzedAt: new Date().toISOString(),
-          };
-        }
-      }
-
-      await this.projectRepository.save(project);
+      return await this.projectRepository.save(project);
     }
 
+    // Project exists — refresh folder name, path, framework on every call so
+    // we always reflect where the user is currently working.
+    const needsUpdate =
+      project.metadata?.folderName !== folderName ||
+      project.metadata?.localPath !== localPath ||
+      !!detection;
+    if (needsUpdate) {
+      project.metadata = buildMetadata(project.metadata);
+      await this.projectRepository.save(project);
+    }
     return project;
   }
 
@@ -226,6 +247,67 @@ export class ProjectsService {
    * Encuentra o crea proyecto con datos proporcionados
    * Usado por McpService cuando no hay path al proyecto
    */
+  async linkProjects(
+    sourceProjectId: string,
+    targetProjectId: string,
+    type: string = ProjectRelationType.DEPENDS_ON,
+    description?: string,
+  ): Promise<ProjectRelationship> {
+    const existing = await this.relationshipRepository.findOne({
+      where: { sourceProjectId, targetProjectId, type },
+    });
+    if (existing) {
+      if (description && existing.description !== description) {
+        existing.description = description;
+        return this.relationshipRepository.save(existing);
+      }
+      return existing;
+    }
+    const rel = this.relationshipRepository.create({
+      sourceProjectId,
+      targetProjectId,
+      type,
+      description,
+    });
+    return this.relationshipRepository.save(rel);
+  }
+
+  async getRelatedProjects(projectId: string): Promise<{
+    dependsOn: Array<{ project: Project; type: string; description?: string }>;
+    usedBy: Array<{ project: Project; type: string; description?: string }>;
+  }> {
+    const outgoing = await this.relationshipRepository.find({
+      where: { sourceProjectId: projectId },
+      relations: ['targetProject'],
+    });
+    const incoming = await this.relationshipRepository.find({
+      where: { targetProjectId: projectId },
+      relations: ['sourceProject'],
+    });
+    return {
+      dependsOn: outgoing.map((r) => ({
+        project: r.targetProject!,
+        type: r.type,
+        description: r.description,
+      })),
+      usedBy: incoming.map((r) => ({
+        project: r.sourceProject!,
+        type: r.type,
+        description: r.description,
+      })),
+    };
+  }
+
+  async findByPath(projectPath: string): Promise<Project | null> {
+    if (!projectPath) return null;
+    const folderName = path.basename(projectPath);
+    return this.projectRepository
+      .createQueryBuilder('p')
+      .where(`p.metadata->>'localPath' = :localPath`, { localPath: projectPath })
+      .orWhere(`p.metadata->>'folderName' = :folderName`, { folderName })
+      .getOne();
+  }
+
   async findOrCreateProject(data: {
     name: string;
     userId: string;
