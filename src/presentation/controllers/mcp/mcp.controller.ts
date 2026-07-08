@@ -19,6 +19,11 @@ import { SSEServerTransport } from '@modelcontextprotocol/sdk/server/sse.js';
 import { RedisService } from '@infrastructure/database/redis/redis.service';
 import { ProjectsService } from '@modules/projects/application/services/projects.service';
 import { McpPlanService } from '@modules/plans/application/services/mcp-plan.service';
+import { GraphifyExecutorService } from '@agents/graphify/graphify-executor.service';
+import { ObsidianVaultService } from '@agents/obsidian/obsidian-vault.service';
+import { ContextNodeService } from '@modules/contexts/application/services/context-node.service';
+import { ContextService } from '@modules/contexts/application/services/context.service';
+import { ContextType } from '@modules/contexts/domain/entities/context.entity';
 import * as path from 'path';
 
 @ApiTags('MCP')
@@ -34,6 +39,10 @@ export class McpController {
     private readonly redisService: RedisService,
     private readonly projectsService: ProjectsService,
     private readonly mcpPlanService: McpPlanService,
+    private readonly graphifyExecutor: GraphifyExecutorService,
+    private readonly obsidianVault: ObsidianVaultService,
+    private readonly contextNodeService: ContextNodeService,
+    private readonly contextService: ContextService,
   ) {}
 
   @Get('sse')
@@ -395,6 +404,232 @@ export class McpController {
         },
       },
       {
+        name: 'graphify_query',
+        description:
+          'Consulta el grafo de conocimiento del proyecto. Responde preguntas sobre la arquitectura y relaciones del código.',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            question: {
+              type: 'string',
+              description: 'Pregunta sobre el código',
+            },
+          },
+          required: ['question'],
+        },
+      },
+      {
+        name: 'graphify_explain',
+        description: 'Explica un nodo específico del grafo de conocimiento',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            node: { type: 'string', description: 'Nombre del nodo a explicar' },
+          },
+          required: ['node'],
+        },
+      },
+      {
+        name: 'graphify_path',
+        description: 'Encuentra el camino más corto entre dos nodos del grafo',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            nodeA: { type: 'string', description: 'Primer nodo' },
+            nodeB: { type: 'string', description: 'Segundo nodo' },
+          },
+          required: ['nodeA', 'nodeB'],
+        },
+      },
+      {
+        name: 'graphify_build',
+        description:
+          'Construye o actualiza el grafo de conocimiento del proyecto',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            path: { type: 'string', description: 'Ruta del proyecto' },
+            mode: {
+              type: 'string',
+              enum: ['standard', 'deep'],
+              description: 'Modo de extracción',
+            },
+            update: { type: 'boolean', description: 'Solo archivos cambiados' },
+            obsidian: {
+              type: 'boolean',
+              description: 'Generar vault Obsidian',
+            },
+          },
+          required: ['path'],
+        },
+      },
+      {
+        name: 'obsidian_search',
+        description: 'Busca notas en un vault Obsidian por contenido',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            vault: { type: 'string', description: 'Ruta al vault Obsidian' },
+            query: { type: 'string', description: 'Texto a buscar' },
+            limit: {
+              type: 'number',
+              description: 'Máximo resultados',
+              default: 10,
+            },
+          },
+          required: ['vault', 'query'],
+        },
+      },
+      {
+        name: 'obsidian_read',
+        description: 'Lee una nota específica del vault Obsidian',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            vault: { type: 'string', description: 'Ruta al vault Obsidian' },
+            path: { type: 'string', description: 'Ruta relativa de la nota' },
+          },
+          required: ['vault', 'path'],
+        },
+      },
+      {
+        name: 'obsidian_write',
+        description: 'Crea o actualiza una nota en el vault Obsidian',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            vault: { type: 'string', description: 'Ruta al vault Obsidian' },
+            path: { type: 'string', description: 'Ruta relativa de la nota' },
+            content: { type: 'string', description: 'Contenido Markdown' },
+          },
+          required: ['vault', 'path', 'content'],
+        },
+      },
+      {
+        name: 'obsidian_list',
+        description: 'Lista todas las notas del vault Obsidian',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            vault: { type: 'string', description: 'Ruta al vault Obsidian' },
+            folder: { type: 'string', description: 'Subcarpeta opcional' },
+          },
+          required: ['vault'],
+        },
+      },
+      {
+        name: 'obsidian_tags',
+        description: 'Lista todas las etiquetas del vault Obsidian',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            vault: { type: 'string', description: 'Ruta al vault Obsidian' },
+          },
+          required: ['vault'],
+        },
+      },
+      {
+        name: 'obsidian_backlinks',
+        description: 'Obtiene los backlinks de una nota en el vault Obsidian',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            vault: { type: 'string', description: 'Ruta al vault Obsidian' },
+            path: { type: 'string', description: 'Ruta relativa de la nota' },
+          },
+          required: ['vault', 'path'],
+        },
+      },
+      {
+        name: 'context_search',
+        description:
+          'Busca en el historial de conversaciones previas del proyecto usando BM25. Devuelve fragmentos relevantes del chat.',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            query: {
+              type: 'string',
+              description:
+                'Término de búsqueda (ej: inventario, auth, base de datos)',
+            },
+            projectPath: {
+              type: 'string',
+              description: 'Path del proyecto (opcional, se auto-detecta)',
+            },
+            limit: {
+              type: 'number',
+              description: 'Máximo de resultados',
+              default: 5,
+            },
+          },
+          required: ['query'],
+        },
+      },
+      {
+        name: 'memory_save',
+        description:
+          'Guarda un fragmento de conocimiento en la memoria persistente del proyecto. Útil para recordar decisiones, configuraciones, o contexto importante.',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            key: {
+              type: 'string',
+              description:
+                'Identificador descriptivo (ej: "decisión-arquitectura-auth")',
+            },
+            content: { type: 'string', description: 'Contenido a recordar' },
+            tags: {
+              type: 'string',
+              description:
+                'Etiquetas separadas por coma (ej: "arquitectura, auth, decisión")',
+            },
+            projectPath: {
+              type: 'string',
+              description: 'Path del proyecto (opcional)',
+            },
+          },
+          required: ['key', 'content'],
+        },
+      },
+      {
+        name: 'memory_search',
+        description:
+          'Busca en la memoria persistente del proyecto. Recupera decisiones, configuraciones y contexto guardado previamente.',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            query: { type: 'string', description: 'Término de búsqueda' },
+            projectPath: {
+              type: 'string',
+              description: 'Path del proyecto (opcional)',
+            },
+            limit: {
+              type: 'number',
+              description: 'Máximo de resultados',
+              default: 10,
+            },
+          },
+          required: ['query'],
+        },
+      },
+      {
+        name: 'memory_list',
+        description: 'Lista todas las memorias guardadas del proyecto.',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            projectPath: {
+              type: 'string',
+              description: 'Path del proyecto (opcional)',
+            },
+            tag: {
+              type: 'string',
+              description: 'Filtrar por etiqueta (opcional)',
+            },
+          },
+        },
+      },
+      {
         name: 'list_rules',
         description: 'Lista todas las reglas disponibles',
         inputSchema: {
@@ -475,6 +710,185 @@ export class McpController {
         );
         const data = await response.json();
         return this.formatListRulesResponse(data);
+      }
+
+      case 'graphify_query': {
+        const result = await this.graphifyExecutor.query(args.question);
+        return result.answer;
+      }
+
+      case 'graphify_explain': {
+        const result = await this.graphifyExecutor.explain(args.node);
+        return result.explanation;
+      }
+
+      case 'graphify_path': {
+        const result = await this.graphifyExecutor.path(args.nodeA, args.nodeB);
+        return result.path.join('\n');
+      }
+
+      case 'graphify_build': {
+        const result = await this.graphifyExecutor.buildGraph({
+          path: args.path,
+          mode: args.mode,
+          update: args.update,
+          obsidian: args.obsidian,
+        });
+        return result;
+      }
+
+      case 'obsidian_search': {
+        const results = await this.obsidianVault.search(
+          args.vault,
+          args.query,
+          args.limit,
+        );
+        if (results.length === 0) return 'No se encontraron notas.';
+        return results
+          .map(
+            (r, i) =>
+              `${i + 1}. **${r.title}** (${r.path})\n   ...${r.snippet}...`,
+          )
+          .join('\n\n');
+      }
+
+      case 'obsidian_read': {
+        const content = await this.obsidianVault.readNote(
+          args.vault,
+          args.path,
+        );
+        return content || `Nota no encontrada: ${args.path}`;
+      }
+
+      case 'obsidian_write': {
+        await this.obsidianVault.writeNote(args.vault, args.path, args.content);
+        return `Nota creada/actualizada: ${args.path}`;
+      }
+
+      case 'obsidian_list': {
+        const notes = await this.obsidianVault.listNotes(
+          args.vault,
+          args.folder,
+        );
+        if (notes.length === 0) return 'El vault está vacío.';
+        return notes.map((n) => `- **${n.title}** (${n.path})`).join('\n');
+      }
+
+      case 'obsidian_tags': {
+        const tags = await this.obsidianVault.getTags(args.vault);
+        if (tags.length === 0) return 'No hay etiquetas.';
+        return tags.map((t) => `- #${t}`).join('\n');
+      }
+
+      case 'obsidian_backlinks': {
+        const backlinks = await this.obsidianVault.getBacklinks(
+          args.vault,
+          args.path,
+        );
+        if (backlinks.length === 0) return `Sin backlinks para: ${args.path}`;
+        return backlinks.map((b) => `- **${b.title}** (${b.path})`).join('\n');
+      }
+
+      case 'context_search': {
+        const query = args?.query;
+        if (!query) return 'Especifica un query de búsqueda.';
+        const projectId = await this.resolveProjectId(args?.projectPath);
+        if (!projectId)
+          return 'No se pudo resolver el proyecto. Proporciona projectPath.';
+        const results = await this.contextNodeService.search(
+          projectId,
+          query,
+          args?.limit || 5,
+        );
+        if (results.length === 0)
+          return `No encontré contexto relacionado con "${query}" en el historial del proyecto.`;
+        return `🔍 Contexto relevante para "${query}":\n\n${results
+          .map(
+            (r, i) =>
+              `**${i + 1}.** [${r.node.role}] ${r.snippet.replace(/\n/g, ' ').substring(0, 200)}${r.snippet.length > 200 ? '...' : ''}\n   *Score: ${(r.score * 100).toFixed(0)}% | Sesión: ${r.node.sessionId?.substring(0, 12)}...*`,
+          )
+          .join('\n\n')}`;
+      }
+
+      case 'memory_save': {
+        const key = args?.key;
+        const content = args?.content;
+        if (!key || !content) return 'Requiere key y content.';
+        const projectId = await this.resolveProjectId(args?.projectPath);
+        if (!projectId) return 'No se pudo resolver el proyecto.';
+        const tags = args?.tags
+          ? args.tags.split(',').map((t) => t.trim())
+          : [];
+        const context = await this.contextService.createContext({
+          type: ContextType.MEMORY,
+          summary: key,
+          extractedInfo: {
+            type: 'memory',
+            key,
+            content,
+            tags,
+            savedAt: new Date().toISOString(),
+          } as any,
+          metadata: { projectPath: args?.projectPath },
+        });
+        return `🧠 Memoria guardada: "${key}" (${context.contextId})`;
+      }
+
+      case 'memory_search': {
+        const memQuery = args?.query;
+        if (!memQuery) return 'Especifica un query de búsqueda.';
+        const memProjectId = await this.resolveProjectId(args?.projectPath);
+        if (!memProjectId) return 'No se pudo resolver el proyecto.';
+        const repo = this.contextService['contextRepository'].getRepository();
+        const memories = await repo.find({
+          where: { type: ContextType.MEMORY as any, isActive: true },
+          order: { updatedAt: 'DESC' },
+          take: 50,
+        });
+        const lowerQuery = memQuery.toLowerCase();
+        const filtered = memories
+          .filter(
+            (m) =>
+              m.summary?.toLowerCase().includes(lowerQuery) ||
+              JSON.stringify(m.extractedInfo)
+                .toLowerCase()
+                .includes(lowerQuery),
+          )
+          .slice(0, args?.limit || 10);
+        if (filtered.length === 0)
+          return `No encontré memorias con "${memQuery}".`;
+        return `🧠 Memorias encontradas (${filtered.length}):\n\n${filtered
+          .map((m, i) => {
+            const info = m.extractedInfo || {};
+            return `**${i + 1}.** ${m.summary || info.key || 'Sin título'}\n   ${(info.content || '').substring(0, 150)}${(info.content || '').length > 150 ? '...' : ''}\n   ${info.tags?.length ? `🏷️ ${info.tags.join(', ')}` : ''}`;
+          })
+          .join('\n\n')}`;
+      }
+
+      case 'memory_list': {
+        const listProjectId = await this.resolveProjectId(args?.projectPath);
+        if (!listProjectId) return 'No se pudo resolver el proyecto.';
+        const listRepo =
+          this.contextService['contextRepository'].getRepository();
+        const allMemories = await listRepo.find({
+          where: { type: ContextType.MEMORY as any, isActive: true },
+          order: { updatedAt: 'DESC' },
+        });
+        const tagFilter = args?.tag?.toLowerCase();
+        const filtered = tagFilter
+          ? allMemories.filter((m) => {
+              const tags: string[] = m.extractedInfo?.tags || [];
+              return tags.some((t) => t.toLowerCase().includes(tagFilter));
+            })
+          : allMemories;
+        if (filtered.length === 0)
+          return 'No hay memorias guardadas para este proyecto.';
+        return `🧠 **${filtered.length} memoria(s)**\n\n${filtered
+          .map((m, i) => {
+            const info = m.extractedInfo || {};
+            return `${i + 1}. **${m.summary || info.key || 'Sin título'}**\n   ${(info.content || '').substring(0, 100)}${(info.content || '').length > 100 ? '...' : ''}\n   🏷️ ${info.tags?.join(', ') || 'sin etiquetas'} | Actualizado: ${m.updatedAt?.toISOString().split('T')[0]}`;
+          })
+          .join('\n\n')}`;
       }
 
       default:
@@ -780,11 +1194,12 @@ export class McpController {
       });
 
       // ── EJECUTAR agente especializado si el router lo indicó ────────────────
+      let targetAgentId: string | undefined;
       if (
         response.data?.nextAction?.type === 'execute_agent' &&
         response.data?.nextAction?.agent
       ) {
-        const targetAgentId: string = response.data.nextAction.agent;
+        targetAgentId = response.data.nextAction.agent;
         const targetAgent =
           this.routerAgent['agentRegistry'].getAgent(targetAgentId);
 
@@ -820,6 +1235,15 @@ export class McpController {
             );
           }
         }
+      }
+
+      // AUTO-SAVE DECISIONS TO MEMORY (analyza input de usuario + respuesta del agente)
+      if (projectIdForSession) {
+        await this.saveAutoMemory(
+          `${input}\n${response.data?.message || ''}`,
+          projectIdForSession,
+          targetAgentId || response.data?.metadata?.agentId,
+        );
       }
 
       // SAVE RESPONSE TO POSTGRESQL with rules metadata
@@ -1152,6 +1576,22 @@ export class McpController {
     };
   }
 
+  @Post('execute-tool')
+  @ApiOperation({
+    summary:
+      'Ejecuta una herramienta MCP por nombre (graphify, obsidian, memory, etc.)',
+  })
+  async executeTool(@Body() body: { tool: string; args: Record<string, any> }) {
+    const { tool, args } = body;
+    if (!tool) return { success: false, error: 'tool name is required' };
+    try {
+      const result = await this.handleToolCall(tool, args || {});
+      return { success: true, data: result };
+    } catch (error) {
+      return { success: false, error: error.message };
+    }
+  }
+
   @Get('agents')
   @ApiOperation({ summary: 'List all registered agents' })
   getAgents() {
@@ -1167,6 +1607,116 @@ export class McpController {
       })),
       usage: stats,
     };
+  }
+
+  /**
+   * Resuelve projectPath → projectId (UUID) para usar con ContextNodeService.
+   */
+  private async resolveProjectId(projectPath?: string): Promise<string | null> {
+    if (!projectPath) {
+      return null;
+    }
+    try {
+      const detection = await this.projectsService.detectFromPath(projectPath);
+      const name = detection?.name || path.basename(projectPath);
+      const clientIp = '127.0.0.1';
+      const { user } = await this.mcpService['userRepository'].findByIpOrCreate(
+        { ipAddress: clientIp },
+      );
+      const project = await this.projectsService.findOrCreateForUser(
+        user.id,
+        name,
+        projectPath,
+      );
+      return project.id;
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * Auto-guarda decisiones clave detectadas en la respuesta del agente.
+   * Escanea el texto en busca de patrones de decisión y persiste en contexts con type='memory'.
+   */
+  private async saveAutoMemory(
+    message: string,
+    projectId: string,
+    agentId?: string,
+  ): Promise<void> {
+    const decisionKeywords = [
+      'decidí',
+      'decidimos',
+      'implementé',
+      'implementamos',
+      'refactoricé',
+      'cambiamos',
+      'solución fue',
+      'optamos',
+      'elegimos',
+      'migramos',
+      'agregamos',
+      'removimos',
+      'la arquitectura es',
+      'usamos',
+      'estructura es',
+      'conclusión',
+      'resumen',
+      'tl;dr',
+      'en resumen',
+    ];
+    const lower = message.toLowerCase();
+    const foundKeywords = decisionKeywords.filter((k) => lower.includes(k));
+    if (foundKeywords.length === 0) return;
+
+    const lines = message.split('\n');
+    const decisionLines = lines.filter((l) => {
+      const lineLower = l.toLowerCase();
+      return decisionKeywords.some((k) => lineLower.includes(k));
+    });
+    if (decisionLines.length === 0) return;
+
+    const content = decisionLines.join('\n').substring(0, 1000);
+    const summary = `Auto: ${foundKeywords.slice(0, 3).join(', ')}`;
+    const tags = [
+      ...new Set(
+        foundKeywords.map((k) => {
+          if (k.includes('arquitectura') || k.includes('estructura'))
+            return 'arquitectura';
+          if (k.includes('migramos') || k.includes('cambiamos'))
+            return 'cambio';
+          if (
+            k.includes('decid') ||
+            k.includes('optamos') ||
+            k.includes('elegimos')
+          )
+            return 'decision';
+          if (k.includes('conclusión') || k.includes('resumen'))
+            return 'resumen';
+          return 'auto';
+        }),
+      ),
+    ];
+
+    try {
+      await this.contextService.createContext({
+        type: ContextType.MEMORY,
+        summary: summary.substring(0, 200),
+        extractedInfo: {
+          type: 'auto_memory',
+          agentId,
+          content,
+          tags,
+          keywords: foundKeywords,
+          projectId,
+          savedAt: new Date().toISOString(),
+        } as any,
+      });
+      this.logger.log(
+        `🧠 Auto-memory saved: ${summary} | tags: ${tags.join(', ')}`,
+      );
+    } catch (err) {
+      this.logger.warn(`Auto-memory save failed: ${err.message}`);
+    }
   }
 
   /**
@@ -1533,6 +2083,29 @@ export class McpController {
         },
       });
       this.logger.log(`📋 Plan created via API: ${plan.id} | ${title}`);
+
+      // Also save as memory in contexts
+      if (summary || title) {
+        try {
+          await this.contextService.createContext({
+            type: ContextType.MEMORY,
+            summary: `Plan: ${title}`,
+            extractedInfo: {
+              type: 'plan_memory',
+              content: summary || title,
+              planId: plan.id,
+              agentId: agentId || 'RouterAgent',
+              intention: intention || 'code',
+              tags: ['plan', intention || 'code'],
+              savedAt: new Date().toISOString(),
+            } as any,
+          });
+          this.logger.log(`🧠 Plan saved as memory: ${title}`);
+        } catch (err) {
+          this.logger.warn(`Plan memory save failed: ${err.message}`);
+        }
+      }
+
       return {
         success: true,
         data: { id: plan.id, title: plan.title, status: plan.status },

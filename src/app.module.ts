@@ -48,6 +48,12 @@ import { Context7AgentModule } from '@agents/context7/context7.module';
 import { Context7Module as InfrastructureContext7Module } from '@infrastructure/adapters/context7/context7.module';
 import { ContextAgent } from '@agents/context/context.agent';
 import { ProjectHistoryAgent } from '@agents/history/project-history.agent';
+import { GraphifyAgent } from '@agents/graphify/graphify.agent';
+import { GraphifyExecutorService } from '@agents/graphify/graphify-executor.service';
+import { GraphifyModule } from '@agents/graphify/graphify.module';
+import { ObsidianAgent } from '@agents/obsidian/obsidian.agent';
+import { ObsidianVaultService } from '@agents/obsidian/obsidian-vault.service';
+import { ObsidianModule } from '@agents/obsidian/obsidian.module';
 import { RedisIssueContextService } from '@infrastructure/cache/redis-issue-context.service';
 import { AgentCatalogService } from '@modules/agents/application/services/agent-catalog.service';
 import { PatternService } from '@modules/agents/application/services/pattern.service';
@@ -101,6 +107,10 @@ import { AgentsModule } from '@modules/agents/agents.module';
 
     // Agent Config Module (Gentle AI migration)
     AgentsModule,
+
+    // New Agent Integrations
+    GraphifyModule,
+    ObsidianModule,
   ],
   controllers: [
     HealthController,
@@ -127,7 +137,7 @@ import { AgentsModule } from '@modules/agents/agents.module';
     AgentRegistry,
     RouterAgent,
 
-    // Specialized Agents (10 agentes)
+    // Specialized Agents (17 agentes)
     SearchAgent,
     IdentityAgent,
     RulesAgent,
@@ -143,6 +153,10 @@ import { AgentsModule } from '@modules/agents/agents.module';
     Context7Agent,
     ContextAgent,
     ProjectHistoryAgent,
+    GraphifyAgent,
+    ObsidianAgent,
+    GraphifyExecutorService,
+    ObsidianVaultService,
 
     // Services
     RedisIssueContextService,
@@ -177,6 +191,8 @@ export class AppModule implements OnModuleInit {
     private readonly context7Agent: Context7Agent,
     private readonly contextAgent: ContextAgent,
     private readonly projectHistoryAgent: ProjectHistoryAgent,
+    private readonly graphifyAgent: GraphifyAgent,
+    private readonly obsidianAgent: ObsidianAgent,
     private readonly rulesEngine: RulesEngine,
   ) {}
 
@@ -200,6 +216,8 @@ export class AppModule implements OnModuleInit {
     this.agentRegistry.register(this.context7Agent);
     this.agentRegistry.register(this.contextAgent);
     this.agentRegistry.register(this.projectHistoryAgent);
+    this.agentRegistry.register(this.graphifyAgent);
+    this.agentRegistry.register(this.obsidianAgent);
 
     // Register agents in the router
     this.routerAgent.registerAllAgents();

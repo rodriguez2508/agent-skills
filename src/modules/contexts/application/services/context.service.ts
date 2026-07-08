@@ -19,11 +19,13 @@ export class ContextService {
 
   async createContext(data: CreateContextDto) {
     this.logger.log(
-      `📝 Creating context for issue: ${data.issueId}, type: ${data.type}`,
+      `📝 Creating context${data.issueId ? ` for issue: ${data.issueId}` : ''}, type: ${data.type}`,
     );
 
     // Deactivate previous active contexts for this issue
-    await this.contextRepository.deactivateAllForIssue(data.issueId);
+    if (data.issueId) {
+      await this.contextRepository.deactivateAllForIssue(data.issueId);
+    }
 
     const context = await this.contextRepository.create(data);
 

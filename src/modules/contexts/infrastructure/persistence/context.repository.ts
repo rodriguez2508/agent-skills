@@ -13,7 +13,7 @@ import {
 } from '@modules/contexts/domain/entities/context.entity';
 
 export interface CreateContextDto {
-  issueId: string;
+  issueId?: string;
   type: ContextType;
   summary?: string;
   messages?: any[];

@@ -22,19 +22,26 @@ import { SessionRepository } from '@modules/sessions/infrastructure/persistence/
 import { UserRepository } from '@modules/users/infrastructure/persistence/user.repository';
 import { ProjectsService } from '@modules/projects/application/services/projects.service';
 import { IssueRepository } from '@infrastructure/persistence/repositories/issue.repository';
-import { Issue, IssueStatus } from '@modules/issues/domain/entities/issue.entity';
+import {
+  Issue,
+  IssueStatus,
+} from '@modules/issues/domain/entities/issue.entity';
 import { SessionStatus } from '@modules/sessions/domain/entities/session.entity';
 import { RedisService } from '@infrastructure/database/redis/redis.service';
 import { RedisIssueContextService } from '@infrastructure/cache/redis-issue-context.service';
+import { ContextNodeService } from '@modules/contexts/application/services/context-node.service';
 import { AgentRegistry } from '@core/agents/agent-registry';
 import { Project } from '@modules/projects/domain/entities/project.entity';
 import { ProjectDetection } from '@modules/projects/application/services/projects.service';
-import { ContextNodeService } from '@modules/contexts/application/services/context-node.service';
 import { MessageRole } from '@modules/sessions/domain/entities/chat-message.entity';
 import { AgentCatalogService } from '@modules/agents/application/services/agent-catalog.service';
 import { McpPlanService } from '@modules/plans/application/services/mcp-plan.service';
 import { McpPlanStatus } from '@modules/plans/domain/entities/mcp-plan.entity';
-import { buildSessionInitResponse, SessionInitResponse, RelatedProjectSummary } from '@core/agents/mcp-json-response';
+import {
+  buildSessionInitResponse,
+  SessionInitResponse,
+  RelatedProjectSummary,
+} from '@core/agents/mcp-json-response';
 
 interface StartSessionBody {
   clientId?: string;
@@ -198,7 +205,12 @@ export class SessionsController {
       nextSteps: Issue['nextSteps'];
       keyDecisions: string[];
       filesModified: string[];
-      recentMessages: Array<{ role: string; content: string; timestamp: string; agentId?: string }>;
+      recentMessages: Array<{
+        role: string;
+        content: string;
+        timestamp: string;
+        agentId?: string;
+      }>;
       summary?: string;
     } | null = null;
     if (activeIssue) {
@@ -246,7 +258,8 @@ export class SessionsController {
 
   @Post('resume')
   @ApiOperation({
-    summary: 'Resume a session by sessionId or clientId, returning full history',
+    summary:
+      'Resume a session by sessionId or clientId, returning full history',
   })
   async resume(@Body() body: ResumeSessionBody, @Req() req: Request) {
     const clientIp = req.ip || 'unknown';
@@ -259,9 +272,8 @@ export class SessionsController {
     let sessionId = body.sessionId;
     if (!sessionId) {
       sessionId =
-        (await this.redisService.get<string>(
-          `client:${clientId}:sessionId`,
-        )) ?? undefined;
+        (await this.redisService.get<string>(`client:${clientId}:sessionId`)) ??
+        undefined;
     }
 
     if (!sessionId) {
@@ -345,9 +357,8 @@ export class SessionsController {
     let sessionId = body.sessionId;
     if (!sessionId) {
       sessionId =
-        (await this.redisService.get<string>(
-          `client:${clientId}:sessionId`,
-        )) ?? undefined;
+        (await this.redisService.get<string>(`client:${clientId}:sessionId`)) ??
+        undefined;
     }
     if (!sessionId) {
       throw new BadRequestException(
@@ -415,10 +426,15 @@ export class SessionsController {
   }
 
   @Post('project/link')
-  @ApiOperation({ summary: 'Link two projects with a relationship type (grpc_client, depends_on, calls, shared_db)' })
+  @ApiOperation({
+    summary:
+      'Link two projects with a relationship type (grpc_client, depends_on, calls, shared_db)',
+  })
   async linkProjects(@Body() body: LinkProjectsBody) {
     if (!body.sourceProjectId || !body.targetProjectId) {
-      throw new BadRequestException('sourceProjectId and targetProjectId are required');
+      throw new BadRequestException(
+        'sourceProjectId and targetProjectId are required',
+      );
     }
     const rel = await this.projectsService.linkProjects(
       body.sourceProjectId,
@@ -430,7 +446,9 @@ export class SessionsController {
   }
 
   @Get('project/:id/related')
-  @ApiOperation({ summary: 'Get all projects related to the given project (both directions)' })
+  @ApiOperation({
+    summary: 'Get all projects related to the given project (both directions)',
+  })
   async getRelatedProjects(@Param('id') id: string) {
     const related = await this.projectsService.getRelatedProjects(id);
     return { success: true, projectId: id, ...related };
@@ -484,7 +502,8 @@ export class SessionsController {
    */
   @Post('init-auto')
   @ApiOperation({
-    summary: 'Auto-init: crea sesión + registra proyecto por cwd + devuelve catálogo de agentes',
+    summary:
+      'Auto-init: crea sesión + registra proyecto por cwd + devuelve catálogo de agentes',
   })
   async initAuto(
     @Body() body: { cwd: string; clientId?: string; userAgent?: string },
@@ -501,7 +520,9 @@ export class SessionsController {
       throw new BadRequestException('cwd is required');
     }
 
-    const { user } = await this.userRepository.findByIpOrCreate({ ipAddress: clientIp });
+    const { user } = await this.userRepository.findByIpOrCreate({
+      ipAddress: clientIp,
+    });
 
     // Detectar proyecto desde cwd
     const detection = await this.projectsService.detectFromPath(body.cwd);
@@ -517,7 +538,9 @@ export class SessionsController {
     );
 
     // Reutilizar sesión activa o crear nueva
-    const existingSessionId = await this.redisService.get<string>(`client:${clientId}:sessionId`);
+    const existingSessionId = await this.redisService.get<string>(
+      `client:${clientId}:sessionId`,
+    );
     let session = existingSessionId
       ? await this.sessionRepository.findBySessionId(existingSessionId)
       : null;
@@ -529,24 +552,49 @@ export class SessionsController {
         userId: user.id,
         projectId: project.id,
         title: `Auto-init: ${projectName}`,
-        metadata: { ipAddress: clientIp, userAgent: body.userAgent, mcpClient: clientId },
+        metadata: {
+          ipAddress: clientIp,
+          userAgent: body.userAgent,
+          mcpClient: clientId,
+        },
       });
     } else if (!session.projectId) {
-      await this.sessionRepository.getRepository().update({ id: session.id }, { projectId: project.id });
+      await this.sessionRepository
+        .getRepository()
+        .update({ id: session.id }, { projectId: project.id });
       session.projectId = project.id;
     }
 
     // Persistir en Redis
-    await this.redisService.set(`client:${clientId}:sessionId`, session.sessionId, 3600);
-    await this.redisService.set(`session:${session.sessionId}:projectId`, project.id, 3600);
-    await this.redisService.set(`session:${session.sessionId}:projectName`, project.name, 3600);
+    await this.redisService.set(
+      `client:${clientId}:sessionId`,
+      session.sessionId,
+      3600,
+    );
+    await this.redisService.set(
+      `session:${session.sessionId}:projectId`,
+      project.id,
+      3600,
+    );
+    await this.redisService.set(
+      `session:${session.sessionId}:projectName`,
+      project.name,
+      3600,
+    );
 
-    // Cargar catálogo BM2, planes activos, sesiones recientes y proyectos relacionados en paralelo
-    const [catalog, activePlansRaw, recentSessionsRaw, relatedRaw] = await Promise.all([
+    // Cargar catálogo BM2, planes activos, sesiones recientes, proyectos relacionados e historial de contexto en paralelo
+    const [
+      catalog,
+      activePlansRaw,
+      recentSessionsRaw,
+      relatedRaw,
+      projectHistory,
+    ] = await Promise.all([
       this.agentCatalog.getSummaryForCli(),
       this.mcpPlanService.findByProject(project.id, McpPlanStatus.IN_PROGRESS),
       this.sessionRepository.findByProjectId(project.id, 5),
       this.projectsService.getRelatedProjects(project.id),
+      this.contextNodes.getProjectSummary(project.id).catch(() => null),
     ]);
 
     const activePlans = activePlansRaw.map((p) => ({
@@ -616,6 +664,15 @@ export class SessionsController {
       recentSessions,
       relatedProjects,
       pendingWorkSummary,
+      projectHistory: projectHistory
+        ? {
+            totalMessages: projectHistory.totalMessages,
+            issuesWorked: projectHistory.issuesWorked,
+            keyDecisions: projectHistory.keyDecisions,
+            modulesModified: projectHistory.modulesModified,
+            relevantChunks: projectHistory.relevantChunks,
+          }
+        : undefined,
     });
   }
 }

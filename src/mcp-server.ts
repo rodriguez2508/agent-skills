@@ -310,6 +310,192 @@ const TOOLS = [
     },
   },
   {
+    name: 'graphify_query',
+    description: 'Consulta el grafo de conocimiento del proyecto',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        question: { type: 'string', description: 'Pregunta sobre el código' },
+      },
+      required: ['question'],
+    },
+  },
+  {
+    name: 'graphify_explain',
+    description: 'Explica un nodo del grafo de conocimiento',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        node: { type: 'string', description: 'Nombre del nodo' },
+      },
+      required: ['node'],
+    },
+  },
+  {
+    name: 'graphify_path',
+    description: 'Camino más corto entre dos nodos del grafo',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        nodeA: { type: 'string', description: 'Primer nodo' },
+        nodeB: { type: 'string', description: 'Segundo nodo' },
+      },
+      required: ['nodeA', 'nodeB'],
+    },
+  },
+  {
+    name: 'graphify_build',
+    description: 'Construye el grafo de conocimiento del proyecto',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        path: { type: 'string', description: 'Ruta del proyecto' },
+        mode: { type: 'string', enum: ['standard', 'deep'] },
+        update: { type: 'boolean' },
+        obsidian: { type: 'boolean' },
+      },
+      required: ['path'],
+    },
+  },
+  {
+    name: 'obsidian_search',
+    description: 'Busca notas en vault Obsidian por contenido',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        vault: { type: 'string', description: 'Ruta al vault' },
+        query: { type: 'string', description: 'Texto a buscar' },
+        limit: { type: 'number', default: 10 },
+      },
+      required: ['vault', 'query'],
+    },
+  },
+  {
+    name: 'obsidian_read',
+    description: 'Lee una nota del vault Obsidian',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        vault: { type: 'string', description: 'Ruta al vault' },
+        path: { type: 'string', description: 'Ruta de la nota' },
+      },
+      required: ['vault', 'path'],
+    },
+  },
+  {
+    name: 'obsidian_write',
+    description: 'Crea o actualiza una nota en el vault Obsidian',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        vault: { type: 'string', description: 'Ruta al vault' },
+        path: { type: 'string', description: 'Ruta de la nota' },
+        content: { type: 'string', description: 'Contenido Markdown' },
+      },
+      required: ['vault', 'path', 'content'],
+    },
+  },
+  {
+    name: 'obsidian_list',
+    description: 'Lista notas del vault Obsidian',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        vault: { type: 'string', description: 'Ruta al vault' },
+        folder: { type: 'string', description: 'Subcarpeta opcional' },
+      },
+      required: ['vault'],
+    },
+  },
+  {
+    name: 'obsidian_tags',
+    description: 'Lista etiquetas del vault Obsidian',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        vault: { type: 'string', description: 'Ruta al vault' },
+      },
+      required: ['vault'],
+    },
+  },
+  {
+    name: 'obsidian_backlinks',
+    description: 'Obtiene backlinks de una nota',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        vault: { type: 'string', description: 'Ruta al vault' },
+        path: { type: 'string', description: 'Ruta de la nota' },
+      },
+      required: ['vault', 'path'],
+    },
+  },
+  {
+    name: 'context_search',
+    description:
+      'Busca en el historial de conversaciones previas del proyecto usando BM25. Devuelve fragmentos relevantes del chat.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        query: { type: 'string', description: 'Término de búsqueda' },
+        projectPath: {
+          type: 'string',
+          description: 'Path del proyecto (opcional)',
+        },
+        limit: { type: 'number', default: 5 },
+      },
+      required: ['query'],
+    },
+  },
+  {
+    name: 'memory_save',
+    description:
+      'Guarda un fragmento de conocimiento en la memoria persistente del proyecto.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        key: { type: 'string', description: 'Identificador descriptivo' },
+        content: { type: 'string', description: 'Contenido a recordar' },
+        tags: { type: 'string', description: 'Etiquetas separadas por coma' },
+        projectPath: {
+          type: 'string',
+          description: 'Path del proyecto (opcional)',
+        },
+      },
+      required: ['key', 'content'],
+    },
+  },
+  {
+    name: 'memory_search',
+    description: 'Busca en la memoria persistente del proyecto.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        query: { type: 'string', description: 'Término de búsqueda' },
+        projectPath: {
+          type: 'string',
+          description: 'Path del proyecto (opcional)',
+        },
+        limit: { type: 'number', default: 10 },
+      },
+      required: ['query'],
+    },
+  },
+  {
+    name: 'memory_list',
+    description: 'Lista todas las memorias guardadas del proyecto.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        projectPath: {
+          type: 'string',
+          description: 'Path del proyecto (opcional)',
+        },
+        tag: { type: 'string', description: 'Filtrar por etiqueta' },
+      },
+    },
+  },
+  {
     name: 'list_plans',
     description:
       'Lista los planes activos para una sesión o proyecto. Si se da sessionId, devuelve el plan activo. Si se da projectId, devuelve todos los planes.',
@@ -757,6 +943,35 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           `**Título**: ${planData.data.title}\n` +
           `**Estado**: ${planData.data.status}\n\n` +
           `El plan ha sido guardado en la base de datos. Puedes consultarlo con \`list_plans\`.`;
+        break;
+      }
+
+      case 'graphify_query':
+      case 'graphify_explain':
+      case 'graphify_path':
+      case 'graphify_build':
+      case 'obsidian_search':
+      case 'obsidian_read':
+      case 'obsidian_write':
+      case 'obsidian_list':
+      case 'obsidian_tags':
+      case 'obsidian_backlinks':
+      case 'context_search':
+      case 'memory_save':
+      case 'memory_search':
+      case 'memory_list': {
+        const toolResp = await fetch(`${API_URL}/mcp/execute-tool`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ tool: name, args }),
+        });
+        if (!toolResp.ok) {
+          throw new Error(`execute-tool failed: ${toolResp.status}`);
+        }
+        const toolData = await toolResp.json();
+        result = toolData.success
+          ? toolData.data
+          : `⚠️ ${toolData.error || 'error desconocido'}`;
         break;
       }
 

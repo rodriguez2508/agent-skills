@@ -619,6 +619,41 @@ export class RouterAgent extends BaseAgent {
       return 'reject-suggested';
     }
 
+    // Patrones de Graphify - ALTA PRIORIDAD
+    if (
+      this.matchesPattern(lowerInput, [
+        'graphify',
+        'grafo de conocimiento',
+        'knowledge graph',
+        'graphify query',
+        'graphify path',
+        'graphify explain',
+        'construye grafo',
+        'construye el grafo',
+      ])
+    ) {
+      return 'graphify';
+    }
+
+    // Patrones de Obsidian - ALTA PRIORIDAD
+    if (
+      this.matchesPattern(lowerInput, [
+        'obsidian',
+        'segundo cerebro',
+        'vault',
+        'notas',
+        'backlinks',
+        'buscar en vault',
+        'leer nota',
+        'crear nota',
+        'escribir nota',
+        'lista de notas',
+        'listar notas',
+      ])
+    ) {
+      return 'obsidian';
+    }
+
     // Actualización de contexto — ALTA PRIORIDAD (Claude reporta trabajo realizado)
     if (
       this.matchesPattern(lowerInput, [
@@ -917,6 +952,8 @@ export class RouterAgent extends BaseAgent {
       git: 'GitHubAgent',
       'project-history': 'ProjectHistoryAgent',
       'context-update': 'ContextAgent',
+      graphify: 'GraphifyAgent',
+      obsidian: 'ObsidianAgent',
       'confirm-suggested': '__confirm__',
       'reject-suggested': '__reject__',
     };
@@ -944,6 +981,8 @@ export class RouterAgent extends BaseAgent {
       'pm',
       'project-history',
       'context-update',
+      'graphify',
+      'obsidian',
     ].includes(intention);
   }
 

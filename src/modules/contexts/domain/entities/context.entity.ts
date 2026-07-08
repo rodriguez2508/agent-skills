@@ -24,6 +24,7 @@ export enum ContextType {
   DISCUSSION = 'discussion',
   REVIEW = 'review',
   COMMAND = 'command',
+  MEMORY = 'memory',
 }
 
 @Entity('contexts')
@@ -31,7 +32,7 @@ export class Context {
   @PrimaryGeneratedColumn('uuid')
   id: string;
 
-  @Column({ type: 'varchar', length: 50 })
+  @Column({ type: 'varchar', length: 50, name: 'context_id' })
   @Index()
   contextId: string; // External ID (e.g., "CTX-001")
 
@@ -49,7 +50,7 @@ export class Context {
     timestamp: string;
   }[];
 
-  @Column({ type: 'jsonb', nullable: true })
+  @Column({ type: 'jsonb', nullable: true, name: 'extracted_info' })
   extractedInfo?: {
     filesModified?: string[];
     decisions?: string[];
