@@ -76,6 +76,7 @@ import { IpTrackerMiddleware } from '@shared/middleware/ip-tracker.middleware';
 
 // Agent Config Module (Gentle AI migration)
 import { AgentsModule } from '@modules/agents/agents.module';
+import { SkillsModule } from '@modules/skills/skills.module';
 
 @Module({
   imports: [
@@ -107,6 +108,9 @@ import { AgentsModule } from '@modules/agents/agents.module';
 
     // Agent Config Module (Gentle AI migration)
     AgentsModule,
+
+    // Hermes-style Skill System
+    SkillsModule,
 
     // New Agent Integrations
     GraphifyModule,
