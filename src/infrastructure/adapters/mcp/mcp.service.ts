@@ -2100,6 +2100,68 @@ When in doubt, ALWAYS use the agent_query tool first.`,
       },
     );
 
+    // close_plan — cierra (completa o abandona) un plan
+    server.tool(
+      'close_plan',
+      'Cierra un plan marcándolo como completado o abandonado. Requiere planId y action (complete|abandon).',
+      {
+        planId: z.string().describe('ID del plan a cerrar'),
+        action: z
+          .enum(['complete', 'abandon'])
+          .describe('Acción: complete para marcar como completado, abandon para abandonar'),
+        reason: z.string().optional().describe('Razón opcional del cierre'),
+      },
+      async ({ planId, action, reason }) => {
+        this.logger.log(
+          `📋 MCP: close_plan - planId="${planId}", action="${action}"`,
+        );
+
+        try {
+          const response = await fetch(
+            `http://localhost:${this.apiPort}/mcp/plans/close`,
+            {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ planId, action, reason }),
+            },
+          );
+
+          if (!response.ok) {
+            throw new Error(`HTTP ${response.status}`);
+          }
+
+          const data = await response.json();
+
+          if (!data.success) {
+            return {
+              content: [
+                {
+                  type: 'text' as const,
+                  text: `⚠️ No se pudo cerrar el plan: ${data.error || 'error desconocido'}`,
+                },
+              ],
+              isError: true,
+            };
+          }
+
+          const emoji = action === 'complete' ? '✅' : '🚫';
+          let text = `${emoji} **Plan ${action === 'complete' ? 'completado' : 'abandonado'}**\n\n`;
+          text += `**ID**: \`${data.data.planId}\`\n`;
+          text += `**Estado**: ${data.data.status}\n`;
+          if (reason) text += `**Razón**: ${reason}\n`;
+
+          return { content: [{ type: 'text' as const, text }] };
+        } catch (error) {
+          const msg = error instanceof Error ? error.message : 'Error';
+          this.logger.error(`❌ MCP: close_plan failed - ${msg}`);
+          return {
+            content: [{ type: 'text' as const, text: `❌ Error: ${msg}` }],
+            isError: true,
+          };
+        }
+      },
+    );
+
     // list_plans — consulta planes activos
     server.tool(
       'list_plans',

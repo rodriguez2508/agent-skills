@@ -865,6 +865,20 @@ export class McpController {
           .join('\n\n')}`;
       }
 
+      case 'close_plan': {
+        const planId = args?.planId;
+        const action = args?.action;
+        if (!planId || !action) return 'planId and action (complete|abandon) are required';
+        if (action === 'complete') {
+          await this.mcpPlanService.complete(planId);
+          return `✅ Plan \`${planId}\` completado exitosamente.`;
+        } else if (action === 'abandon') {
+          await this.mcpPlanService.abandon(planId);
+          return `🚫 Plan \`${planId}\` abandonado.`;
+        }
+        return `❌ Acción inválida: "${action}". Usa "complete" o "abandon".`;
+      }
+
       case 'memory_list': {
         const listProjectId = await this.resolveProjectId(args?.projectPath);
         if (!listProjectId) return 'No se pudo resolver el proyecto.';
@@ -2109,6 +2123,36 @@ export class McpController {
       return {
         success: true,
         data: { id: plan.id, title: plan.title, status: plan.status },
+      };
+    } catch (error) {
+      return { success: false, error: error.message };
+    }
+  }
+
+  @Post('plans/close')
+  @ApiOperation({ summary: 'Cierra (completa o abandona) un plan MCP' })
+  async closePlan(
+    @Body()
+    body: {
+      planId: string;
+      action: 'complete' | 'abandon';
+      reason?: string;
+    },
+  ) {
+    const { planId, action, reason } = body;
+    if (!planId || !action) {
+      return { success: false, error: 'planId and action (complete|abandon) are required' };
+    }
+    try {
+      if (action === 'complete') {
+        await this.mcpPlanService.complete(planId);
+      } else {
+        await this.mcpPlanService.abandon(planId);
+      }
+      this.logger.log(`📋 Plan ${action}d: ${planId}${reason ? ` (${reason})` : ''}`);
+      return {
+        success: true,
+        data: { planId, status: action === 'complete' ? 'completed' : 'abandoned' },
       };
     } catch (error) {
       return { success: false, error: error.message };
