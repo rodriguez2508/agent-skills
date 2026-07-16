@@ -18,6 +18,9 @@ import { Context7Adapter } from '@infrastructure/adapters/context7/context7.adap
 import { SkillFileService } from '@modules/skills/services/skill-file.service';
 import { MemoryFileService } from '@modules/memory/services/memory-file.service';
 import { MemorySearchService } from '@modules/memory/services/memory-search.service';
+import { InstallService } from '@modules/agents/application/services/install.service';
+import { BackupService } from '@modules/agents/application/services/backup.service';
+import { AgentConfigRegistryService } from '@infrastructure/adapters/agent-config/agent-config-registry.service';
 import * as fs from 'fs/promises';
 import * as path from 'path';
 import { promisify } from 'util';
@@ -50,6 +53,9 @@ export class McpService {
     private readonly skillFileService: SkillFileService,
     private readonly memoryFileService: MemoryFileService,
     private readonly memorySearchService: MemorySearchService,
+    private readonly installService: InstallService,
+    private readonly backupService: BackupService,
+    private readonly agentConfigRegistry: AgentConfigRegistryService,
   ) {
     this.apiPort = this.configService.get<number>('PORT', 8004);
   }
@@ -2470,6 +2476,347 @@ When in doubt, ALWAYS use the agent_query tool first.`,
             content: [{ type: 'text' as const, text: `❌ Error: ${msg}` }],
             isError: true,
           };
+        }
+      },
+    );
+
+    // ─── Ecosystem & Agent Management Tools ──────────────────────
+    // ecosystem_agents_list — lista todos los agentes soportados
+    server.tool(
+      'ecosystem_agents_list',
+      'Lista todos los agentes CLI soportados (qwen-cli, claude-code, opencode) que pueden ser configurados.',
+      {},
+      async () => {
+        try {
+          const agentsList = this.agentConfigRegistry.supportedAgents();
+          const text = `🤖 **Agentes soportados (${agentsList.length}):**\n` +
+            agentsList.map((id) => `  - \`${id}\``).join('\n');
+          return { content: [{ type: 'text' as const, text }] };
+        } catch (error) {
+          const msg = error instanceof Error ? error.message : 'Error';
+          return { content: [{ type: 'text' as const, text: `❌ Error: ${msg}` }], isError: true };
+        }
+      },
+    );
+
+    // ecosystem_agent_detect — detecta un agente específico
+    server.tool(
+      'ecosystem_agent_detect',
+      'Detecta si un agente CLI específico está instalado en el sistema y devuelve su versión y configuración.',
+      {
+        agentId: z.string().describe('ID del agente (qwen-cli, claude-code, opencode)'),
+      },
+      async ({ agentId }) => {
+        try {
+          const homeDir = process.env.HOME || process.env.USERPROFILE || '';
+          const adapter = this.agentConfigRegistry.getAdapter(agentId);
+          if (!adapter) {
+            return { content: [{ type: 'text' as const, text: `Agente "${agentId}" no encontrado en el registry.` }], isError: true };
+          }
+          const result = await adapter.detect(homeDir);
+          const text = result.installed
+            ? `✅ **${agentId}** está instalado\n   Path: ${result.binaryPath}\n   Config: ${result.configPath}\n   Versión: ${result.version || 'desconocida'}`
+            : `❌ **${agentId}** no está instalado en el sistema.`;
+          return { content: [{ type: 'text' as const, text }] };
+        } catch (error) {
+          const msg = error instanceof Error ? error.message : 'Error';
+          return { content: [{ type: 'text' as const, text: `❌ Error: ${msg}` }], isError: true };
+        }
+      },
+    );
+
+    // ecosystem_install — instala el ecosistema en agentes
+    server.tool(
+      'ecosystem_install',
+      'Instala el ecosistema Gentle AI en agentes seleccionados. Configura SDD, skills, MCP server y persona. Usa dryRun=true para previsualizar sin aplicar cambios.',
+      {
+        agents: z.array(z.string()).describe('Agentes destino (qwen-cli, claude-code, opencode)'),
+        components: z.array(z.string()).optional().describe('Componentes a instalar: sdd, skills, mcp, persona (default: todos)'),
+        skills: z.array(z.string()).optional().describe('Skills individuales a instalar'),
+        persona: z.string().optional().describe('Persona a inyectar: gentleman'),
+        dryRun: z.boolean().optional().default(false).describe('Solo previsualizar sin aplicar cambios'),
+      },
+      async ({ agents, components, skills, persona, dryRun }) => {
+        try {
+          const result = await this.installService.execute({ agents, components, skills, persona, dryRun });
+          let text = result.dryRun
+            ? `🔍 **Dry Run** — Plan de instalación:\n\n`
+            : `🚀 **Resultado de instalación:**\n\n`;
+          text += `✅ Agentes: ${result.agents.join(', ') || 'ninguno'}\n`;
+          text += `📦 Componentes: ${result.components.join(', ') || 'ninguno'}\n`;
+          if (result.skills.length > 0) text += `🛠️ Skills: ${result.skills.join(', ')}\n`;
+          if (result.persona) text += `👤 Persona: ${result.persona}\n`;
+          if (result.errors.length > 0) {
+            text += `\n❌ **Errores (${result.errors.length}):**\n${result.errors.map((e) => `  - ${e}`).join('\n')}`;
+          }
+          text += `\n${result.message}`;
+          return { content: [{ type: 'text' as const, text }] };
+        } catch (error) {
+          const msg = error instanceof Error ? error.message : 'Error';
+          return { content: [{ type: 'text' as const, text: `❌ Error: ${msg}` }], isError: true };
+        }
+      },
+    );
+
+    // ecosystem_sync — sincroniza assets
+    server.tool(
+      'ecosystem_sync',
+      'Sincroniza los assets gestionados (SDD, skills) a la versión actual. Operación idempotente — segura de ejecutar múltiples veces.',
+      {
+        agents: z.array(z.string()).describe('Agentes a sincronizar'),
+        components: z.array(z.string()).optional().describe('Componentes a sincronizar (default: sdd)'),
+      },
+      async ({ agents, components }) => {
+        try {
+          const result = await this.installService.sync({ agents, components });
+          let text = `🔄 **Resultado de sync:**\n\n`;
+          text += `✅ Agentes: ${result.agents.join(', ') || 'ninguno'}\n`;
+          if (result.errors.length > 0) {
+            text += `\n❌ Errores: ${result.errors.map((e) => `  - ${e}`).join('\n')}`;
+          }
+          text += `\n${result.message}`;
+          return { content: [{ type: 'text' as const, text }] };
+        } catch (error) {
+          const msg = error instanceof Error ? error.message : 'Error';
+          return { content: [{ type: 'text' as const, text: `❌ Error: ${msg}` }], isError: true };
+        }
+      },
+    );
+
+    // ecosystem_backup_create — crea un backup
+    server.tool(
+      'ecosystem_backup_create',
+      'Crea un backup comprimido (tar.gz) de la configuración de agentes seleccionados. Incluye system prompts, settings, MCP configs y skills.',
+      {
+        agents: z.array(z.string()).describe('Agentes a incluir en el backup'),
+      },
+      async ({ agents }) => {
+        try {
+          const { InstallationProfile } = await import('@modules/agents/domain/entities/installation-profile.entity');
+          const profile = InstallationProfile.create(
+            `backup-${Date.now()}`,
+            agents.map((id: string) => ({ id } as any)),
+            [], [], null,
+          );
+          const snapshot = await this.backupService.createBackup(profile);
+          const text = `💾 **Backup creado:**\n   ID: \`${snapshot.id}\`\n   Fecha: ${snapshot.timestamp}\n   Tamaño: ${((snapshot.sizeBytes || 0) / 1024).toFixed(1)} KB\n   Hash: ${(snapshot.hash || '').substring(0, 16)}...`;
+          return { content: [{ type: 'text' as const, text }] };
+        } catch (error) {
+          const msg = error instanceof Error ? error.message : 'Error';
+          return { content: [{ type: 'text' as const, text: `❌ Error: ${msg}` }], isError: true };
+        }
+      },
+    );
+
+    // ecosystem_backup_list — lista backups
+    server.tool(
+      'ecosystem_backup_list',
+      'Lista todos los backups de configuración de agentes disponibles, ordenados del más reciente al más antiguo.',
+      {},
+      async () => {
+        try {
+          const backups = await this.backupService.listBackups();
+          if (backups.length === 0) {
+            return { content: [{ type: 'text' as const, text: '📭 No hay backups disponibles.' }] };
+          }
+          let text = `💾 **Backups disponibles (${backups.length}):**\n\n`;
+          for (const b of backups) {
+            const agentNames = b.profile?.agents?.map((a) => a.id).join(', ') || 'N/A';
+            text += `- \`${b.id.substring(0, 8)}...\` | ${b.timestamp} | ${((b.sizeBytes || 0) / 1024).toFixed(1)} KB | ${agentNames}${b.pinned ? ' 📌' : ''}\n`;
+          }
+          return { content: [{ type: 'text' as const, text: text.trim() }] };
+        } catch (error) {
+          const msg = error instanceof Error ? error.message : 'Error';
+          return { content: [{ type: 'text' as const, text: `❌ Error: ${msg}` }], isError: true };
+        }
+      },
+    );
+
+    // ecosystem_backup_restore — restaura un backup
+    server.tool(
+      'ecosystem_backup_restore',
+      'Restaura un backup de configuración de agente por su ID. Reemplaza los archivos de configuración con los del backup.',
+      {
+        backupId: z.string().describe('ID del backup a restaurar'),
+      },
+      async ({ backupId }) => {
+        try {
+          await this.backupService.restoreBackup(backupId);
+          const text = `♻️ Backup **${backupId.substring(0, 12)}...** restaurado exitosamente.`;
+          return { content: [{ type: 'text' as const, text }] };
+        } catch (error) {
+          const msg = error instanceof Error ? error.message : 'Error';
+          return { content: [{ type: 'text' as const, text: `❌ Error: ${msg}` }], isError: true };
+        }
+      },
+    );
+
+    // ecosystem_presets_list — lista presets disponibles
+    server.tool(
+      'ecosystem_presets_list',
+      'Lista los presets de instalación disponibles (full-gentleman, ecosystem-only, minimal, custom).',
+      {},
+      async () => {
+        try {
+          const presets = [
+            { id: 'full-gentleman', name: 'Full Gentleman', desc: 'Instalación completa con SDD+skills+MCP+persona' },
+            { id: 'ecosystem-only', name: 'Ecosystem Only', desc: 'Solo MCP y SDD, sin skills ni persona' },
+            { id: 'minimal', name: 'Minimal', desc: 'Solo la configuración MCP básica' },
+            { id: 'custom', name: 'Custom', desc: 'Selección manual de componentes' },
+          ];
+          const text = `📋 **Presets disponibles:**\n\n${presets.map((p) => `- **${p.id}**: ${p.name} — ${p.desc}`).join('\n')}`;
+          return { content: [{ type: 'text' as const, text }] };
+        } catch (error) {
+          const msg = error instanceof Error ? error.message : 'Error';
+          return { content: [{ type: 'text' as const, text: `❌ Error: ${msg}` }], isError: true };
+        }
+      },
+    );
+
+    // ─── Issue Workflow Tools ────────────────────────────────────
+    // issue_workflow_start — inicia un nuevo issue con workflow
+    server.tool(
+      'issue_workflow_start',
+      'Inicia un nuevo issue con workflow de 9 pasos (READ, ANALYZE, PLAN, CODE, TEST, COMMIT, PUSH, CREATE_PR_MD, CREATE_PR).',
+      {
+        title: z.string().describe('Título descriptivo del issue'),
+        description: z.string().optional().describe('Descripción detallada'),
+        sessionId: z.string().optional().describe('ID de sesión'),
+        userId: z.string().optional().describe('ID de usuario'),
+      },
+      async ({ title, description, sessionId, userId }) => {
+        try {
+          // Llamar al controller via API
+          const response = await fetch(`http://localhost:${this.apiPort}/mcp/execute-tool`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              tool: 'issue_workflow_start',
+              args: { title, description, sessionId, userId },
+            }),
+          });
+          const data = await response.json();
+          const text = data.success ? data.data : `⚠️ ${data.error || 'Error'}`;
+          return { content: [{ type: 'text' as const, text }] };
+        } catch (error) {
+          const msg = error instanceof Error ? error.message : 'Error';
+          return { content: [{ type: 'text' as const, text: `❌ Error: ${msg}` }], isError: true };
+        }
+      },
+    );
+
+    // issue_workflow_status — consulta estado del issue
+    server.tool(
+      'issue_workflow_status',
+      'Consulta el estado actual del issue activo: paso del workflow, pasos completados, próximos pasos.',
+      {
+        sessionId: z.string().optional().describe('ID de sesión'),
+        issueId: z.string().optional().describe('ID del issue'),
+      },
+      async ({ sessionId }) => {
+        try {
+          const response = await fetch(`http://localhost:${this.apiPort}/mcp/execute-tool`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              tool: 'issue_workflow_status',
+              args: { sessionId },
+            }),
+          });
+          const data = await response.json();
+          const text = data.success ? data.data : `⚠️ ${data.error || 'Error'}`;
+          return { content: [{ type: 'text' as const, text }] };
+        } catch (error) {
+          const msg = error instanceof Error ? error.message : 'Error';
+          return { content: [{ type: 'text' as const, text: `❌ Error: ${msg}` }], isError: true };
+        }
+      },
+    );
+
+    // issue_workflow_step — avanza o salta a un paso
+    server.tool(
+      'issue_workflow_step',
+      'Avanza el workflow al siguiente paso o salta a un paso específico (READ, ANALYZE, PLAN, CODE, TEST, COMMIT, PUSH, CREATE_PR_MD, CREATE_PR).',
+      {
+        sessionId: z.string().optional().describe('ID de sesión'),
+        issueId: z.string().optional().describe('ID del issue'),
+        targetStep: z.enum(['READ', 'ANALYZE', 'PLAN', 'CODE', 'TEST', 'COMMIT', 'PUSH', 'CREATE_PR_MD', 'CREATE_PR']).optional().describe('Paso específico al que saltar'),
+      },
+      async ({ sessionId, targetStep }) => {
+        try {
+          const response = await fetch(`http://localhost:${this.apiPort}/mcp/execute-tool`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              tool: 'issue_workflow_step',
+              args: { sessionId, targetStep },
+            }),
+          });
+          const data = await response.json();
+          const text = data.success ? data.data : `⚠️ ${data.error || 'Error'}`;
+          return { content: [{ type: 'text' as const, text }] };
+        } catch (error) {
+          const msg = error instanceof Error ? error.message : 'Error';
+          return { content: [{ type: 'text' as const, text: `❌ Error: ${msg}` }], isError: true };
+        }
+      },
+    );
+
+    // issue_workflow_plan — crea/actualiza plan
+    server.tool(
+      'issue_workflow_plan',
+      'Crea o actualiza el plan de implementación del issue activo.',
+      {
+        sessionId: z.string().optional().describe('ID de sesión'),
+        issueId: z.string().optional().describe('ID del issue'),
+        plan: z.string().describe('Descripción del plan de implementación'),
+        steps: z.array(z.string()).optional().describe('Lista de próximos pasos'),
+      },
+      async ({ sessionId, plan, steps }) => {
+        try {
+          const response = await fetch(`http://localhost:${this.apiPort}/mcp/execute-tool`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              tool: 'issue_workflow_plan',
+              args: { sessionId, plan, steps },
+            }),
+          });
+          const data = await response.json();
+          const text = data.success ? data.data : `⚠️ ${data.error || 'Error'}`;
+          return { content: [{ type: 'text' as const, text }] };
+        } catch (error) {
+          const msg = error instanceof Error ? error.message : 'Error';
+          return { content: [{ type: 'text' as const, text: `❌ Error: ${msg}` }], isError: true };
+        }
+      },
+    );
+
+    // issue_workflow_complete — completa o abandona
+    server.tool(
+      'issue_workflow_complete',
+      'Completa o abandona el issue activo. Usa action="complete" para finalizar exitosamente, action="abandon" para cerrar sin completar.',
+      {
+        sessionId: z.string().optional().describe('ID de sesión'),
+        issueId: z.string().optional().describe('ID del issue'),
+        action: z.enum(['complete', 'abandon']).describe('Acción: complete o abandon'),
+      },
+      async ({ sessionId, action }) => {
+        try {
+          const response = await fetch(`http://localhost:${this.apiPort}/mcp/execute-tool`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              tool: 'issue_workflow_complete',
+              args: { sessionId, action },
+            }),
+          });
+          const data = await response.json();
+          const text = data.success ? data.data : `⚠️ ${data.error || 'Error'}`;
+          return { content: [{ type: 'text' as const, text }] };
+        } catch (error) {
+          const msg = error instanceof Error ? error.message : 'Error';
+          return { content: [{ type: 'text' as const, text: `❌ Error: ${msg}` }], isError: true };
         }
       },
     );

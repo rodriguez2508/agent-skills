@@ -25,8 +25,15 @@ import { ContextNodeService } from '@modules/contexts/application/services/conte
 import { ContextService } from '@modules/contexts/application/services/context.service';
 import { ContextType } from '@modules/contexts/domain/entities/context.entity';
 import { SkillFileService } from '@modules/skills/services/skill-file.service';
+import { InstallationProfile } from '@modules/agents/domain/entities/installation-profile.entity';
+import { IssueWorkflowAgent } from '@agents/workflow/issue-workflow.agent';
+import { IssueService } from '@modules/issues/application/services/issue.service';
+import { IssueWorkflowStep } from '@modules/issues/domain/entities/issue.entity';
 import { MemoryFileService } from '@modules/memory/services/memory-file.service';
 import { MemorySearchService } from '@modules/memory/services/memory-search.service';
+import { InstallService } from '@modules/agents/application/services/install.service';
+import { BackupService } from '@modules/agents/application/services/backup.service';
+import { AgentConfigRegistryService } from '@infrastructure/adapters/agent-config/agent-config-registry.service';
 import * as path from 'path';
 
 @ApiTags('MCP')
@@ -49,6 +56,11 @@ export class McpController {
     private readonly memoryFileService: MemoryFileService,
     private readonly memorySearchService: MemorySearchService,
     private readonly skillFileService: SkillFileService,
+    private readonly installService: InstallService,
+    private readonly backupService: BackupService,
+    private readonly agentConfigRegistry: AgentConfigRegistryService,
+    private readonly issueWorkflowAgent: IssueWorkflowAgent,
+    private readonly issueService: IssueService,
   ) {}
 
   @Get('sse')
@@ -650,6 +662,289 @@ export class McpController {
           },
         },
       },
+
+      // ─── Ecosystem & Agent Management Tools ──────────────────────
+      {
+        name: 'ecosystem_agents_list',
+        description:
+          'Lista todos los agentes CLI soportados (qwen, claude, opencode)',
+        inputSchema: {
+          type: 'object',
+          properties: {},
+        },
+      },
+      {
+        name: 'ecosystem_agent_detect',
+        description:
+          'Detecta si un agente CLI específico está instalado en el sistema',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            agentId: {
+              type: 'string',
+              description: 'ID del agente (qwen-cli, claude-code, opencode)',
+            },
+          },
+          required: ['agentId'],
+        },
+      },
+      {
+        name: 'ecosystem_install',
+        description:
+          'Instala el ecosistema Gentle AI en agentes seleccionados. Incluye SDD, skills, MCP y persona.',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            agents: {
+              type: 'array',
+              items: { type: 'string' },
+              description: 'Agentes destino (qwen-cli, claude-code, opencode)',
+            },
+            components: {
+              type: 'array',
+              items: { type: 'string' },
+              description: 'Componentes a instalar: sdd, skills, mcp, persona (opcional, default: todos)',
+            },
+            skills: {
+              type: 'array',
+              items: { type: 'string' },
+              description: 'Skills individuales a instalar (opcional)',
+            },
+            persona: {
+              type: 'string',
+              description: 'Persona a inyectar: gentleman (opcional)',
+            },
+            dryRun: {
+              type: 'boolean',
+              description: 'Solo previsualizar sin aplicar cambios',
+            },
+          },
+          required: ['agents'],
+        },
+      },
+      {
+        name: 'ecosystem_sync',
+        description:
+          'Sincroniza assets gestionados a la versión actual (idempotente)',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            agents: {
+              type: 'array',
+              items: { type: 'string' },
+              description: 'Agentes a sincronizar',
+            },
+            components: {
+              type: 'array',
+              items: { type: 'string' },
+              description: 'Componentes a sincronizar (opcional, default: sdd)',
+            },
+          },
+          required: ['agents'],
+        },
+      },
+      {
+        name: 'ecosystem_backup_create',
+        description:
+          'Crea un backup comprimido de la configuración de agentes seleccionados',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            agents: {
+              type: 'array',
+              items: { type: 'string' },
+              description: 'Agentes a incluir en el backup',
+            },
+          },
+          required: ['agents'],
+        },
+      },
+      {
+        name: 'ecosystem_backup_list',
+        description: 'Lista todos los backups disponibles',
+        inputSchema: {
+          type: 'object',
+          properties: {},
+        },
+      },
+      {
+        name: 'ecosystem_backup_restore',
+        description: 'Restaura un backup por su ID',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            backupId: {
+              type: 'string',
+              description: 'ID del backup a restaurar',
+            },
+          },
+          required: ['backupId'],
+        },
+      },
+      {
+        name: 'ecosystem_presets_list',
+        description: 'Lista los presets de instalación disponibles',
+        inputSchema: {
+          type: 'object',
+          properties: {},
+        },
+      },
+
+      // ─── Issue Workflow Tools ───────────────────────────────────
+      // ─── Issue Workflow Tools ───────────────────────────────────
+      {
+        name: 'init_session',
+        description:
+          'Inicializa una sesión MCP. Devuelve JSON con sessionId, proyecto activo, plan activo, issue activo y resumen de trabajo pendiente. Es el primer paso que debe llamar un agente CLI.',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            sessionId: {
+              type: 'string',
+              description: 'ID de sesión (se genera uno nuevo si no se provee)',
+            },
+            userId: {
+              type: 'string',
+              description: 'ID de usuario (opcional)',
+            },
+          },
+          required: [],
+        },
+      },
+      {
+        name: 'issue_workflow_start',
+        description:
+          'Inicia un nuevo issue con workflow de 9 pasos (READ → ANALYZE → PLAN → CODE → TEST → COMMIT → PUSH → PR_MD → PR). Crea el issue en BD, establece el paso en READ y registra el plan de trabajo.',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            title: {
+              type: 'string',
+              description: 'Título descriptivo del issue/tarea',
+            },
+            description: {
+              type: 'string',
+              description: 'Descripción detallada (opcional)',
+            },
+            sessionId: {
+              type: 'string',
+              description: 'ID de sesión (opcional)',
+            },
+            userId: {
+              type: 'string',
+              description: 'ID de usuario (opcional)',
+            },
+          },
+          required: ['title'],
+        },
+      },
+      {
+        name: 'issue_workflow_status',
+        description:
+          'Consulta el estado actual del issue y workflow activo. Devuelve paso actual, pasos completados, próximos pasos, decisiones clave y archivos modificados.',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            sessionId: {
+              type: 'string',
+              description: 'ID de sesión',
+            },
+            issueId: {
+              type: 'string',
+              description: 'ID del issue (opcional, usa sesión si no se da)',
+            },
+          },
+          required: [],
+        },
+      },
+      {
+        name: 'issue_workflow_step',
+        description:
+          'Avanza el workflow al siguiente paso o salta a un paso específico del ciclo (READ, ANALYZE, PLAN, CODE, TEST, COMMIT, PUSH, CREATE_PR_MD, CREATE_PR).',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            sessionId: {
+              type: 'string',
+              description: 'ID de sesión',
+            },
+            issueId: {
+              type: 'string',
+              description: 'ID del issue (opcional, usa sesión si no se da)',
+            },
+            targetStep: {
+              type: 'string',
+              enum: [
+                'READ',
+                'ANALYZE',
+                'PLAN',
+                'CODE',
+                'TEST',
+                'COMMIT',
+                'PUSH',
+                'CREATE_PR_MD',
+                'CREATE_PR',
+              ],
+              description:
+                'Paso específico al que saltar (opcional: avanza al siguiente si no se da)',
+            },
+          },
+          required: [],
+        },
+      },
+      {
+        name: 'issue_workflow_plan',
+        description:
+          'Crea o actualiza el plan de implementación del issue. Establece los próximos pasos y las decisiones de implementación.',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            sessionId: {
+              type: 'string',
+              description: 'ID de sesión',
+            },
+            issueId: {
+              type: 'string',
+              description: 'ID del issue (opcional)',
+            },
+            plan: {
+              type: 'string',
+              description: 'Descripción del plan de implementación',
+            },
+            steps: {
+              type: 'array',
+              items: { type: 'string' },
+              description: 'Lista de próximos pasos',
+            },
+          },
+          required: ['plan'],
+        },
+      },
+      {
+        name: 'issue_workflow_complete',
+        description:
+          'Completa o abandona el issue actual. Si se completa, marca el workflow como finalizado. Si se abandona, cierra sin completar.',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            sessionId: {
+              type: 'string',
+              description: 'ID de sesión',
+            },
+            issueId: {
+              type: 'string',
+              description: 'ID del issue (opcional)',
+            },
+            action: {
+              type: 'string',
+              enum: ['complete', 'abandon'],
+              description: 'Acción: completar o abandonar',
+              default: 'complete',
+            },
+          },
+          required: ['action'],
+        },
+      },
     ];
   }
 
@@ -1022,6 +1317,271 @@ export class McpController {
           .join('\n\n')}`;
       }
 
+      // ─── Ecosystem & Agent Management Tools ──────────────────────
+      case 'ecosystem_agents_list': {
+        const agentsList = this.agentConfigRegistry.supportedAgents();
+        return `🤖 **Agentes soportados (${agentsList.length}):**\n` +
+          agentsList.map((id) => `  - \`${id}\``).join('\n');
+      }
+
+      case 'ecosystem_agent_detect': {
+        const { agentId } = args || {};
+        if (!agentId) return 'agentId es requerido';
+        const homeDir = process.env.HOME || process.env.USERPROFILE || '';
+        const adapter = this.agentConfigRegistry.getAdapter(agentId);
+        if (!adapter) return `Agente "${agentId}" no encontrado en el registry.`;
+        const result = await adapter.detect(homeDir);
+        return result.installed
+          ? `✅ **${agentId}** está instalado\n   Path: ${result.binaryPath}\n   Config: ${result.configPath}\n   Versión: ${result.version || 'desconocida'}`
+          : `❌ **${agentId}** no está instalado en el sistema.`;
+      }
+
+      case 'ecosystem_install': {
+        const { agents, components, skills, persona, dryRun } = args || {};
+        if (!agents || !Array.isArray(agents) || agents.length === 0) {
+          return 'Se requiere al menos un agente en "agents".';
+        }
+        const result = await this.installService.execute({
+          agents,
+          components,
+          skills,
+          persona,
+          dryRun,
+        });
+        let text = result.dryRun
+          ? `🔍 **Dry Run** — Plan de instalación:\n\n`
+          : `🚀 **Resultado de instalación:**\n\n`;
+        text += `✅ Agentes: ${result.agents.join(', ') || 'ninguno'}\n`;
+        text += `📦 Componentes: ${result.components.join(', ') || 'ninguno'}\n`;
+        if (result.skills.length > 0) text += `🛠️ Skills: ${result.skills.join(', ')}\n`;
+        if (result.persona) text += `👤 Persona: ${result.persona}\n`;
+        if (result.errors.length > 0) {
+          text += `\n❌ **Errores (${result.errors.length}):**\n${result.errors.map((e) => `  - ${e}`).join('\n')}`;
+        }
+        text += `\n${result.message}`;
+        return text;
+      }
+
+      case 'ecosystem_sync': {
+        const syncAgents = args?.agents;
+        if (!syncAgents || !Array.isArray(syncAgents) || syncAgents.length === 0) {
+          return 'Se requiere al menos un agente en "agents".';
+        }
+        const result = await this.installService.sync({
+          agents: syncAgents,
+          components: args?.components,
+        });
+        let text = `🔄 **Resultado de sync:**\n\n`;
+        text += `✅ Agentes: ${result.agents.join(', ') || 'ninguno'}\n`;
+        if (result.errors.length > 0) {
+          text += `\n❌ Errores: ${result.errors.map((e) => `  - ${e}`).join('\n')}`;
+        }
+        text += `\n${result.message}`;
+        return text;
+      }
+
+      case 'ecosystem_backup_create': {
+        const backupAgents = args?.agents;
+        if (!backupAgents || !Array.isArray(backupAgents) || backupAgents.length === 0) {
+          return 'Se requiere al menos un agente en "agents".';
+        }
+        const profile = InstallationProfile.create(
+          `backup-${Date.now()}`,
+          backupAgents.map((id: string) => ({ id } as any)),
+          [],
+          [],
+          null,
+        );
+        const snapshot = await this.backupService.createBackup(profile);
+        return `💾 **Backup creado:**\n   ID: \`${snapshot.id}\`\n   Fecha: ${snapshot.timestamp}\n   Tamaño: ${((snapshot.sizeBytes || 0) / 1024).toFixed(1)} KB\n   Hash: ${(snapshot.hash || '').substring(0, 16)}...`;
+      }
+
+      case 'ecosystem_backup_list': {
+        const backups = await this.backupService.listBackups();
+        if (backups.length === 0) return '📭 No hay backups disponibles.';
+        let text = `💾 **Backups disponibles (${backups.length}):**\n\n`;
+        for (const b of backups) {
+          const agents = b.profile?.agents?.map((a) => a.id).join(', ') || 'N/A';
+          text += `- \`${b.id.substring(0, 8)}...\` | ${b.timestamp} | ${((b.sizeBytes || 0) / 1024).toFixed(1)} KB | Agentes: ${agents}${b.pinned ? ' 📌' : ''}\n`;
+        }
+        return text.trim();
+      }
+
+      case 'ecosystem_backup_restore': {
+        const { backupId } = args || {};
+        if (!backupId) return 'backupId es requerido';
+        await this.backupService.restoreBackup(backupId);
+        return `♻️ Backup **${backupId.substring(0, 12)}...** restaurado exitosamente.`;
+      }
+
+      case 'init_session': {
+        const initSessionId = args?.sessionId || `mcp-${Date.now()}`;
+        const initUserId = args?.userId;
+
+        // Resolver proyecto activo
+        let activeProject: { id: string; name: string } | null = null;
+        const projectId = await this.redisService.get<string>(`session:${initSessionId}:projectId`);
+        const projectName = await this.redisService.get<string>(`session:${initSessionId}:projectName`);
+        if (projectId) {
+          activeProject = { id: projectId, name: projectName || 'Desconocido' };
+        }
+
+        // Buscar plan activo para la sesión
+        let activePlan: { id: string; title: string; status: string } | null = null;
+        try {
+          const plan = await this.mcpPlanService.findBySession(initSessionId);
+          if (plan && plan.status !== 'completed' && plan.status !== 'abandoned') {
+            activePlan = { id: plan.id, title: plan.title, status: plan.status as string };
+          }
+        } catch { /* ignorar */ }
+
+        // Buscar issue activo
+        let activeIssue: { id: string; title: string; currentStep: string; status: string } | null = null;
+        try {
+          const cachedIssueId = await this.redisService.get<string>(`session:${initSessionId}:issueId`);
+          if (cachedIssueId) {
+            const issue = await this.issueService.getIssueById(cachedIssueId);
+            if (issue && issue.status !== 'completed' && issue.status !== 'abandoned') {
+              activeIssue = {
+                id: issue.id,
+                title: issue.title,
+                currentStep: issue.currentWorkflowStep,
+                status: issue.status,
+              };
+            }
+          }
+        } catch { /* ignorar */ }
+
+        const agentsList = this.agentConfigRegistry.supportedAgents();
+
+        return JSON.stringify({
+          sessionId: initSessionId,
+          activeProject,
+          activePlan,
+          activeIssue,
+          availableAgents: agentsList,
+          pendingWorkSummary: activeIssue
+            ? `Issue activo: "${activeIssue.title}" (paso: ${activeIssue.currentStep})`
+            : activePlan
+              ? `Plan activo: "${activePlan.title}"`
+              : 'No hay trabajo pendiente. Di "quiero trabajar en..." para iniciar.',
+        }, null, 2);
+      }
+
+      case 'ecosystem_presets_list': {
+        const presets = [
+          { id: 'full-gentleman', name: 'Full Gentleman', desc: 'Instalación completa con SDD+skills+MCP+persona' },
+          { id: 'ecosystem-only', name: 'Ecosystem Only', desc: 'Solo MCP y SDD, sin skills ni persona' },
+          { id: 'minimal', name: 'Minimal', desc: 'Solo la configuración MCP básica' },
+          { id: 'custom', name: 'Custom', desc: 'Selección manual de componentes' },
+        ];
+        return `📋 **Presets disponibles:**\n\n${presets.map((p) => `- **${p.id}**: ${p.name} — ${p.desc}`).join('\n')}`;
+      }
+
+      // ─── Issue Workflow Tools ───────────────────────────────────
+      case 'issue_workflow_start': {
+        const { title, description, sessionId, userId } = args || {};
+        if (!title) return 'title es requerido';
+
+        // Resolver userId real: primero desde args, luego Redis, luego DB
+        let resolvedUserId = userId;
+        if (!resolvedUserId && sessionId) {
+          try {
+            const cached = await this.redisService.get<string>(`session:${sessionId}:userId`);
+            if (cached) resolvedUserId = cached;
+          } catch {}
+        }
+        // Fallback: buscar sesión en DB
+        if (!resolvedUserId && sessionId) {
+          try {
+            const sessionData = await this.mcpService['sessionRepository'].findBySessionId(sessionId);
+            if (sessionData?.userId) resolvedUserId = sessionData.userId;
+          } catch {}
+        }
+        // Último recurso: crear usuario por IP
+        if (!resolvedUserId) {
+          try {
+            const { user } = await this.mcpService['userRepository'].findByIpOrCreate({ ipAddress: '127.0.0.1' });
+            resolvedUserId = user.id;
+            // Cachearlo para futuras llamadas
+            if (sessionId) {
+              await this.redisService.set(`session:${sessionId}:userId`, user.id, 86400);
+            }
+          } catch {}
+        }
+
+        const result = await this.issueWorkflowAgent.execute({
+          input: `iniciar ${title}`,
+          options: {
+            sessionId: sessionId || `mcp-${Date.now()}`,
+            userId: resolvedUserId, // undefined si no hay userId
+            context: { description },
+          },
+        });
+
+        return result.data?.message || result.data?.toString() || `✅ Issue creado: ${title}`;
+      }
+
+      case 'issue_workflow_status': {
+        const statusSessionId = args?.sessionId || `mcp-${Date.now()}`;
+
+        const result = await this.issueWorkflowAgent.execute({
+          input: 'status',
+          options: { sessionId: statusSessionId },
+        });
+
+        return result.data?.message || result.data?.toString() || 'No hay issue activo.';
+      }
+
+      case 'issue_workflow_step': {
+        const stepSessionId = args?.sessionId || `mcp-${Date.now()}`;
+        const targetStep = args?.targetStep;
+
+        let input: string;
+        if (targetStep) {
+          const stepLabel = targetStep.replace(/^\d+_/, '').toLowerCase();
+          input = stepLabel;
+        } else {
+          input = 'siguiente paso';
+        }
+
+        const result = await this.issueWorkflowAgent.execute({
+          input,
+          options: { sessionId: stepSessionId },
+        });
+
+        return result.data?.message || `➡️ Avanzando en el workflow${targetStep ? ` a ${targetStep}` : ''}...`;
+      }
+
+      case 'issue_workflow_plan': {
+        const planSessionId = args?.sessionId || `mcp-${Date.now()}`;
+        const planDescription = args?.plan || '';
+        const planSteps = args?.steps || [];
+
+        const result = await this.issueWorkflowAgent.execute({
+          input: `plan: ${planDescription}`,
+          options: {
+            sessionId: planSessionId,
+            context: { planSteps },
+          },
+        });
+
+        return result.data?.message || `📋 Plan registrado.`;
+      }
+
+      case 'issue_workflow_complete': {
+        const completeSessionId = args?.sessionId || `mcp-${Date.now()}`;
+        const action = args?.action || 'complete';
+
+        const result = await this.issueWorkflowAgent.execute({
+          input: action === 'complete' ? 'completar' : 'abandonar',
+          options: { sessionId: completeSessionId },
+        });
+
+        const emoji = action === 'complete' ? '🎉' : '🚫';
+        return result.data?.message || `${emoji} Issue ${action === 'complete' ? 'completado' : 'abandonado'}.`;
+      }
+
       default:
         throw new Error(`Unknown tool: ${toolName}`);
     }
@@ -1037,20 +1597,46 @@ export class McpController {
 
     let text = '';
 
+    // Direct agent message (most common)
+    if (data.data?.message) {
+      text += data.data.message + '\n\n';
+    }
     // Web search results
     if (data.data?.formattedResults) {
       text += data.data.formattedResults + '\n\n';
     }
-    // Message from agent
-    if (data.data?.message) {
-      text += data.data.message + '\n\n';
-    }
+    // Issue info
     if (data.data?.issue) {
       const issue = data.data.issue;
       text += `📋 **Issue**: ${issue.title || issue.issueId || 'N/A'}\n`;
       if (issue.id) text += `ID: ${issue.id}\n`;
     }
-    return text.trim();
+    // Steps from workflow
+    if (data.data?.steps) {
+      text += `\n**Steps:**\n${data.data.steps.map((s: string, i: number) => `${i + 1}. ${s}`).join('\n')}\n`;
+    }
+    // Current workflow step
+    if (data.data?.currentStep) {
+      text += `\n**Paso actual:** ${data.data.currentStep}\n`;
+    }
+    // Next steps from workflow
+    if (data.data?.nextSteps) {
+      text += `**Próximos pasos:**\n${data.data.nextSteps.map((s: string) => `- ${s}`).join('\n')}\n`;
+    }
+    // Fallback: if data itself is a string
+    if (!text && typeof data.data === 'string') {
+      text = data.data;
+    }
+    // Fallback: top-level message
+    if (!text && data.message) {
+      text = data.message;
+    }
+    // Fallback: rules context
+    if (!text && data.data?.rulesContext) {
+      text = data.data.rulesContext;
+    }
+
+    return text.trim() || '✅ Operación completada.';
   }
 
   /**

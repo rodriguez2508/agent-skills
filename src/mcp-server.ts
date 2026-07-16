@@ -636,6 +636,204 @@ const TOOLS = [
       'Obtiene el contexto de memoria L1 (MEMORY.md + USER.md) para inyectar en prompts. Siempre incluye decisiones y preferencias.',
     inputSchema: { type: 'object', properties: {} },
   },
+
+  // ─── Ecosystem & Agent Management Tools ──────────────────────
+  {
+    name: 'ecosystem_agents_list',
+    description:
+      'Lista todos los agentes CLI soportados (qwen-cli, claude-code, opencode) que pueden ser configurados.',
+    inputSchema: { type: 'object', properties: {} },
+  },
+  {
+    name: 'ecosystem_agent_detect',
+    description:
+      'Detecta si un agente CLI específico está instalado en el sistema y devuelve versión y configuración.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        agentId: {
+          type: 'string',
+          description: 'ID del agente (qwen-cli, claude-code, opencode)',
+        },
+      },
+      required: ['agentId'],
+    },
+  },
+  {
+    name: 'ecosystem_install',
+    description:
+      'Instala el ecosistema Gentle AI en agentes seleccionados. Configura SDD, skills, MCP server y persona.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        agents: {
+          type: 'array',
+          items: { type: 'string' },
+          description: 'Agentes destino (qwen-cli, claude-code, opencode)',
+        },
+        components: {
+          type: 'array',
+          items: { type: 'string' },
+          description: 'Componentes: sdd, skills, mcp, persona (default: todos)',
+        },
+        skills: {
+          type: 'array',
+          items: { type: 'string' },
+          description: 'Skills individuales a instalar (opcional)',
+        },
+        persona: { type: 'string', description: 'Persona: gentleman (opcional)' },
+        dryRun: {
+          type: 'boolean',
+          description: 'Solo previsualizar sin aplicar cambios',
+        },
+      },
+      required: ['agents'],
+    },
+  },
+  {
+    name: 'ecosystem_sync',
+    description:
+      'Sincroniza assets gestionados a la versión actual. Operación idempotente.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        agents: {
+          type: 'array',
+          items: { type: 'string' },
+          description: 'Agentes a sincronizar',
+        },
+        components: {
+          type: 'array',
+          items: { type: 'string' },
+          description: 'Componentes (default: sdd)',
+        },
+      },
+      required: ['agents'],
+    },
+  },
+  {
+    name: 'ecosystem_backup_create',
+    description:
+      'Crea un backup comprimido (tar.gz) de la configuración de agentes seleccionados.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        agents: {
+          type: 'array',
+          items: { type: 'string' },
+          description: 'Agentes a incluir en el backup',
+        },
+      },
+      required: ['agents'],
+    },
+  },
+  {
+    name: 'ecosystem_backup_list',
+    description:
+      'Lista todos los backups de configuración de agentes disponibles.',
+    inputSchema: { type: 'object', properties: {} },
+  },
+  {
+    name: 'ecosystem_backup_restore',
+    description:
+      'Restaura un backup de configuración de agente por su ID.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        backupId: { type: 'string', description: 'ID del backup a restaurar' },
+      },
+      required: ['backupId'],
+    },
+  },
+  {
+    name: 'ecosystem_presets_list',
+    description:
+      'Lista los presets de instalación disponibles (full-gentleman, ecosystem-only, minimal, custom).',
+    inputSchema: { type: 'object', properties: {} },
+  },
+
+  // ─── Issue Workflow Tools ────────────────────────────────────
+  {
+    name: 'issue_workflow_start',
+    description:
+      'Inicia un nuevo issue con workflow de 9 pasos (READ → ANALYZE → PLAN → CODE → TEST → COMMIT → PUSH → PR_MD → PR).',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        title: { type: 'string', description: 'Título del issue' },
+        description: { type: 'string', description: 'Descripción (opcional)' },
+        sessionId: { type: 'string', description: 'ID de sesión (opcional)' },
+        userId: { type: 'string', description: 'ID de usuario (opcional)' },
+      },
+      required: ['title'],
+    },
+  },
+  {
+    name: 'issue_workflow_status',
+    description:
+      'Consulta el estado actual del issue activo y su workflow.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        sessionId: { type: 'string', description: 'ID de sesión' },
+        issueId: { type: 'string', description: 'ID del issue (opcional)' },
+      },
+    },
+  },
+  {
+    name: 'issue_workflow_step',
+    description:
+      'Avanza al siguiente paso del workflow o salta a un paso específico.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        sessionId: { type: 'string', description: 'ID de sesión' },
+        issueId: { type: 'string', description: 'ID del issue (opcional)' },
+        targetStep: {
+          type: 'string',
+          enum: ['READ', 'ANALYZE', 'PLAN', 'CODE', 'TEST', 'COMMIT', 'PUSH', 'CREATE_PR_MD', 'CREATE_PR'],
+          description: 'Paso específico (opcional: avanza al siguiente si no se da)',
+        },
+      },
+    },
+  },
+  {
+    name: 'issue_workflow_plan',
+    description:
+      'Crea o actualiza el plan de implementación del issue activo.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        sessionId: { type: 'string', description: 'ID de sesión' },
+        issueId: { type: 'string', description: 'ID del issue (opcional)' },
+        plan: { type: 'string', description: 'Descripción del plan' },
+        steps: {
+          type: 'array',
+          items: { type: 'string' },
+          description: 'Lista de próximos pasos',
+        },
+      },
+      required: ['plan'],
+    },
+  },
+  {
+    name: 'issue_workflow_complete',
+    description:
+      'Completa o abandona el issue activo.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        sessionId: { type: 'string', description: 'ID de sesión' },
+        issueId: { type: 'string', description: 'ID del issue (opcional)' },
+        action: {
+          type: 'string',
+          enum: ['complete', 'abandon'],
+          description: 'complete para finalizar, abandon para cerrar sin completar',
+        },
+      },
+      required: ['action'],
+    },
+  },
   {
     name: 'memory_l1_write',
     description:
@@ -1148,7 +1346,20 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       case 'memory_inject':
       case 'memory_l1_write':
       case 'memory_l1_remove':
-      case 'memory_l2_search': {
+      case 'memory_l2_search':
+      case 'ecosystem_agents_list':
+      case 'ecosystem_agent_detect':
+      case 'ecosystem_install':
+      case 'ecosystem_sync':
+      case 'ecosystem_backup_create':
+      case 'ecosystem_backup_list':
+      case 'ecosystem_backup_restore':
+      case 'ecosystem_presets_list':
+      case 'issue_workflow_start':
+      case 'issue_workflow_status':
+      case 'issue_workflow_step':
+      case 'issue_workflow_plan':
+      case 'issue_workflow_complete': {
         const toolResp = await fetch(`${API_URL}/mcp/execute-tool`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
