@@ -15,6 +15,7 @@ import { ProjectsService } from '@modules/projects/application/services/projects
 import { ContextService } from '@modules/contexts/application/services/context.service';
 import { ContextType } from '@modules/contexts/domain/entities/context.entity';
 import { Context7Adapter } from '@infrastructure/adapters/context7/context7.adapter';
+import { SkillFileService } from '@modules/skills/services/skill-file.service';
 import * as fs from 'fs/promises';
 import * as path from 'path';
 import { promisify } from 'util';
@@ -44,6 +45,7 @@ export class McpService {
     private readonly projectsService: ProjectsService,
     private readonly contextService: ContextService,
     private readonly context7Adapter: Context7Adapter,
+    private readonly skillFileService: SkillFileService,
   ) {
     this.apiPort = this.configService.get<number>('PORT', 8004);
   }
@@ -2158,6 +2160,151 @@ When in doubt, ALWAYS use the agent_query tool first.`,
             content: [{ type: 'text' as const, text: `❌ Error: ${msg}` }],
             isError: true,
           };
+        }
+      },
+    );
+
+    // ─── Hermes-style Skill Tools ─────────────────────────────────
+    // skill_list — lista todos los skills disponibles
+    server.tool(
+      'skill_list',
+      'Lista todos los skills Hermes-style disponibles. Progressive disclosure: solo nombres + descripciones.',
+      {
+        limit: z.number().optional().describe('Número máximo de skills'),
+      },
+      async ({ limit }) => {
+        try {
+          const skills = await this.skillFileService.listSkills();
+          const items = limit ? skills.slice(0, limit) : skills;
+          if (items.length === 0) {
+            return { content: [{ type: 'text' as const, text: 'No hay skills disponibles.' }] };
+          }
+          let text = `📚 **${items.length} skill(s) disponibles:**\n\n`;
+          for (const s of items) {
+            text += `- **${s.name}**: ${s.description} (v${s.version}, usada ${s.usageCount}x)\n`;
+          }
+          return { content: [{ type: 'text' as const, text: text.trim() }] };
+        } catch (error) {
+          const msg = error instanceof Error ? error.message : 'Error';
+          return { content: [{ type: 'text' as const, text: `❌ Error: ${msg}` }], isError: true };
+        }
+      },
+    );
+
+    // skill_search — busca skills por relevancia
+    server.tool(
+      'skill_search',
+      'Busca skills por relevancia usando keywords. Devuelve matches ordenados por score.',
+      {
+        query: z.string().describe('Término de búsqueda'),
+        limit: z.number().optional().default(5).describe('Máximo resultados'),
+      },
+      async ({ query, limit }) => {
+        try {
+          const matches = await this.skillFileService.searchSkills(query, limit || 5);
+          if (matches.length === 0) {
+            return { content: [{ type: 'text' as const, text: `No encontré skills para "${query}".` }] };
+          }
+          let text = `🔍 **${matches.length} skill(s) relevantes para "${query}":**\n\n`;
+          for (const m of matches) {
+            text += `- **${m.skill.name}** (${(m.score * 100).toFixed(0)}%): ${m.skill.description}\n`;
+          }
+          return { content: [{ type: 'text' as const, text: text.trim() }] };
+        } catch (error) {
+          const msg = error instanceof Error ? error.message : 'Error';
+          return { content: [{ type: 'text' as const, text: `❌ Error: ${msg}` }], isError: true };
+        }
+      },
+    );
+
+    // skill_get — obtiene skill completo por nombre
+    server.tool(
+      'skill_get',
+      'Obtiene el contenido completo de un skill por su nombre.',
+      {
+        name: z.string().describe('Nombre del skill'),
+      },
+      async ({ name }) => {
+        try {
+          const doc = await this.skillFileService.getSkill(name);
+          if (!doc) {
+            return { content: [{ type: 'text' as const, text: `Skill "${name}" no encontrado.` }] };
+          }
+          const text = `# ${doc.metadata.name}\n\n${doc.metadata.description}\n\nTags: ${doc.metadata.tags.join(', ')}\nVersión: ${doc.metadata.version} | Usos: ${doc.metadata.usageCount}\n\n${doc.body}`;
+          return { content: [{ type: 'text' as const, text }] };
+        } catch (error) {
+          const msg = error instanceof Error ? error.message : 'Error';
+          return { content: [{ type: 'text' as const, text: `❌ Error: ${msg}` }], isError: true };
+        }
+      },
+    );
+
+    // skill_create — crea un nuevo skill
+    server.tool(
+      'skill_create',
+      'Crea un nuevo skill Hermes-style a partir de contenido markdown. Se guarda en ~/.agent-skills/skills/.',
+      {
+        name: z.string().describe('Nombre único del skill (kebab-case)'),
+        description: z.string().describe('Descripción corta'),
+        content: z.string().describe('Contenido markdown del skill'),
+        tags: z.array(z.string()).optional().describe('Tags para categorización'),
+        agents: z.array(z.string()).optional().describe('Agentes relacionados'),
+      },
+      async ({ name, description, content, tags, agents }) => {
+        try {
+          const doc = await this.skillFileService.createSkill(name, description, content, tags || [], agents);
+          const text = `✨ Skill creado: **${name}** (v${doc.metadata.version})`;
+          return { content: [{ type: 'text' as const, text }] };
+        } catch (error) {
+          const msg = error instanceof Error ? error.message : 'Error';
+          return { content: [{ type: 'text' as const, text: `❌ Error: ${msg}` }], isError: true };
+        }
+      },
+    );
+
+    // skill_patch — parchea un skill existente
+    server.tool(
+      'skill_patch',
+      'Parchea un skill existente: añade/reemplaza secciones, tags y descripción. No reescribe el skill completo.',
+      {
+        name: z.string().describe('Nombre del skill a parchear'),
+        sections: z.record(z.string(), z.string()).optional().describe('Secciones a añadir/reemplazar: { "Título": "contenido" }'),
+        addTags: z.array(z.string()).optional().describe('Tags a agregar'),
+        description: z.string().optional().describe('Nueva descripción'),
+      },
+      async ({ name, sections, addTags, description }) => {
+        try {
+          const doc = await this.skillFileService.patchSkill(name, { sections, addTags, description });
+          if (!doc) {
+            return { content: [{ type: 'text' as const, text: `Skill "${name}" no encontrado.` }], isError: true };
+          }
+          const text = `🩹 Skill parcheado: **${name}** → v${doc.metadata.version}`;
+          return { content: [{ type: 'text' as const, text }] };
+        } catch (error) {
+          const msg = error instanceof Error ? error.message : 'Error';
+          return { content: [{ type: 'text' as const, text: `❌ Error: ${msg}` }], isError: true };
+        }
+      },
+    );
+
+    // skill_apply — obtiene skills relevantes para una tarea
+    server.tool(
+      'skill_apply',
+      'Analiza una tarea y devuelve los skills más relevantes para ejecutarla. Útil para auto-inyección de contexto.',
+      {
+        task: z.string().describe('Descripción de la tarea a analizar'),
+        limit: z.number().optional().default(3).describe('Máximo de skills a retornar'),
+      },
+      async ({ task, limit }) => {
+        try {
+          const context = await this.skillFileService.buildSkillsContext(task, limit || 3);
+          if (!context) {
+            return { content: [{ type: 'text' as const, text: 'No se encontraron skills relevantes para esta tarea.' }] };
+          }
+          return { content: [{ type: 'text' as const, text: context.trim() }] };
+        } catch (error) {
+          const msg = error instanceof Error ? error.message : 'Error';
+          return { content: [{ type: 'text' as const, text: `❌ Error: ${msg}` }], isError: true };
         }
       },
     );

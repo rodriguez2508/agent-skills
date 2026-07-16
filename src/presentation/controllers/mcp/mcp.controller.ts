@@ -24,6 +24,7 @@ import { ObsidianVaultService } from '@agents/obsidian/obsidian-vault.service';
 import { ContextNodeService } from '@modules/contexts/application/services/context-node.service';
 import { ContextService } from '@modules/contexts/application/services/context.service';
 import { ContextType } from '@modules/contexts/domain/entities/context.entity';
+import { SkillFileService } from '@modules/skills/services/skill-file.service';
 import * as path from 'path';
 
 @ApiTags('MCP')
@@ -43,6 +44,7 @@ export class McpController {
     private readonly obsidianVault: ObsidianVaultService,
     private readonly contextNodeService: ContextNodeService,
     private readonly contextService: ContextService,
+    private readonly skillFileService: SkillFileService,
   ) {}
 
   @Get('sse')
@@ -877,6 +879,65 @@ export class McpController {
           return `🚫 Plan \`${planId}\` abandonado.`;
         }
         return `❌ Acción inválida: "${action}". Usa "complete" o "abandon".`;
+      }
+
+      // ─── Hermes-style Skill Tools ────────────────────────────────
+      case 'skill_list': {
+        const skills = await this.skillFileService.listSkills();
+        if (skills.length === 0) return 'No hay skills disponibles.';
+        let text = `📚 **${skills.length} skill(s) disponibles:**\n\n`;
+        for (const s of skills) {
+          text += `- **${s.name}**: ${s.description} (v${s.version}, usada ${s.usageCount}x)\n`;
+        }
+        return text.trim();
+      }
+
+      case 'skill_search': {
+        const query = args?.query;
+        if (!query) return 'query es requerido';
+        const matches = await this.skillFileService.searchSkills(query, args?.limit || 5);
+        if (matches.length === 0) return `No encontré skills para "${query}".`;
+        let text = `🔍 **${matches.length} skill(s) relevantes para "${query}":**\n\n`;
+        for (const m of matches) {
+          text += `- **${m.skill.name}** (${(m.score * 100).toFixed(0)}%): ${m.skill.description}\n`;
+        }
+        return text.trim();
+      }
+
+      case 'skill_get': {
+        const name = args?.name;
+        if (!name) return 'name es requerido';
+        const doc = await this.skillFileService.getSkill(name);
+        if (!doc) return `Skill "${name}" no encontrado.`;
+        return `# ${doc.metadata.name}\n\n${doc.metadata.description}\n\nTags: ${doc.metadata.tags.join(', ')}\nVersión: ${doc.metadata.version} | Usos: ${doc.metadata.usageCount}\n\n${doc.body}`;
+      }
+
+      case 'skill_create': {
+        const { name, description, content, tags, agents } = args || {};
+        if (!name || !description || !content) return 'name, description, y content son requeridos';
+        const doc = await this.skillFileService.createSkill(name, description, content, tags || [], agents);
+        return `✨ Skill creado: **${name}** (v${doc.metadata.version})`;
+      }
+
+      case 'skill_patch': {
+        const patchName = args?.name;
+        if (!patchName) return 'name es requerido';
+        const patch = {
+          sections: args?.sections,
+          addTags: args?.addTags,
+          description: args?.description,
+        };
+        const doc = await this.skillFileService.patchSkill(patchName, patch);
+        if (!doc) return `Skill "${patchName}" no encontrado.`;
+        return `🩹 Skill parcheado: **${patchName}** → v${doc.metadata.version}`;
+      }
+
+      case 'skill_apply': {
+        const task = args?.task;
+        if (!task) return 'task es requerido';
+        const context = await this.skillFileService.buildSkillsContext(task, args?.limit || 3);
+        if (!context) return 'No se encontraron skills relevantes para esta tarea.';
+        return context.trim();
       }
 
       case 'memory_list': {
