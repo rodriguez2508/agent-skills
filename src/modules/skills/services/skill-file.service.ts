@@ -60,18 +60,27 @@ export class SkillFileService implements OnModuleInit {
     body: string,
     tags: string[] = [],
     agents?: string[],
+    overwrite = false,
   ): Promise<SkillDocument> {
+    // Check if skill already exists
+    const existing = await this.getSkill(name);
+    if (existing && !overwrite) {
+      throw new Error(
+        `Skill "${name}" ya existe. Usa overwrite=true para sobrescribir, o skill_patch para modificar.`,
+      );
+    }
+
     const now = new Date().toISOString().split('T')[0];
     const metadata: SkillMetadata = {
       name,
       description,
       tags,
-      created: now,
+      created: existing ? existing.metadata.created : now,
       updated: now,
-      usageCount: 0,
-      version: 1,
+      usageCount: existing ? existing.metadata.usageCount : 0,
+      version: existing ? existing.metadata.version + 1 : 1,
       agents,
-      source: 'manual',
+      source: overwrite ? 'overwrite' : 'manual',
     };
 
     const frontmatter = this.buildFrontmatter(metadata);
@@ -82,7 +91,8 @@ export class SkillFileService implements OnModuleInit {
     const doc: SkillDocument = { metadata, body: body.trim(), filePath, raw };
     this.cache.set(name, doc);
 
-    this.logger.log(`✨ Skill created: ${name} (${description})`);
+    const action = existing ? (overwrite ? 'sobrescrito' : 'actualizado') : 'creado';
+    this.logger.log(`✨ Skill ${action}: ${name} (${description})`);
     return doc;
   }
 

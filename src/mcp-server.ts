@@ -518,6 +518,185 @@ const TOOLS = [
       },
     },
   },
+  // ─── Hermes-style Skill Tools ─────────────────────────────────
+  {
+    name: 'skill_list',
+    description:
+      'Lista todos los skills Hermes-style disponibles en ~/.agent-skills/skills/. Progressive disclosure: solo nombres + descripciones.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        limit: {
+          type: 'number',
+          description: 'Número máximo de skills',
+        },
+      },
+    },
+  },
+  {
+    name: 'skill_search',
+    description:
+      'Busca skills por relevancia usando keywords. Devuelve matches ordenados por score.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        query: { type: 'string', description: 'Término de búsqueda' },
+        limit: {
+          type: 'number',
+          default: 5,
+          description: 'Máximo resultados',
+        },
+      },
+      required: ['query'],
+    },
+  },
+  {
+    name: 'skill_get',
+    description:
+      'Obtiene el contenido completo de un skill por su nombre.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        name: { type: 'string', description: 'Nombre del skill' },
+      },
+      required: ['name'],
+    },
+  },
+  {
+    name: 'skill_create',
+    description:
+      'Crea un nuevo skill Hermes-style a partir de contenido markdown. Se guarda en ~/.agent-skills/skills/.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        name: { type: 'string', description: 'Nombre único (kebab-case)' },
+        description: { type: 'string', description: 'Descripción corta' },
+        content: { type: 'string', description: 'Contenido markdown' },
+        tags: {
+          type: 'array',
+          items: { type: 'string' },
+          description: 'Tags opcionales',
+        },
+        agents: {
+          type: 'array',
+          items: { type: 'string' },
+          description: 'Agentes relacionados',
+        },
+      },
+      required: ['name', 'description', 'content'],
+    },
+  },
+  {
+    name: 'skill_patch',
+    description:
+      'Parchea un skill existente: añade/reemplaza secciones, tags y descripción.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        name: { type: 'string', description: 'Nombre del skill' },
+        sections: {
+          type: 'object',
+          description:
+            'Secciones a añadir/reemplazar: { "Título": "contenido" }',
+        },
+        addTags: {
+          type: 'array',
+          items: { type: 'string' },
+          description: 'Tags a agregar',
+        },
+        description: {
+          type: 'string',
+          description: 'Nueva descripción',
+        },
+      },
+      required: ['name'],
+    },
+  },
+  {
+    name: 'skill_apply',
+    description:
+      'Analiza una tarea y devuelve los skills más relevantes para ejecutarla. Auto-inyección de contexto.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        task: { type: 'string', description: 'Descripción de la tarea' },
+        limit: {
+          type: 'number',
+          default: 3,
+          description: 'Máximo de skills a retornar',
+        },
+      },
+      required: ['task'],
+    },
+  },
+  // ─── Hermes-style Memory Tools (L1 + L2) ───────────────────────
+  {
+    name: 'memory_inject',
+    description:
+      'Obtiene el contexto de memoria L1 (MEMORY.md + USER.md) para inyectar en prompts. Siempre incluye decisiones y preferencias.',
+    inputSchema: { type: 'object', properties: {} },
+  },
+  {
+    name: 'memory_l1_write',
+    description:
+      'Guarda una entrada en la memoria L1 (MEMORY.md o USER.md). Se auto-inyecta en todas las conversaciones.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        key: { type: 'string', description: 'Identificador único' },
+        content: { type: 'string', description: 'Contenido de la entrada' },
+        category: {
+          type: 'string',
+          description: 'Categoría: decision, preference, architecture, etc.',
+        },
+        tags: {
+          type: 'array',
+          items: { type: 'string' },
+          description: 'Tags opcionales',
+        },
+        file: {
+          type: 'string',
+          enum: ['memory', 'user'],
+          default: 'memory',
+          description: 'memory=proyecto, user=usuario',
+        },
+      },
+      required: ['key', 'content'],
+    },
+  },
+  {
+    name: 'memory_l1_remove',
+    description: 'Elimina una entrada de la memoria L1 por key.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        key: { type: 'string', description: 'Key de la entrada' },
+        file: {
+          type: 'string',
+          enum: ['memory', 'user'],
+          default: 'memory',
+        },
+      },
+      required: ['key'],
+    },
+  },
+  {
+    name: 'memory_l2_search',
+    description:
+      'Busca en todo el historial de conversaciones (L2) usando full-text search sobre PostgreSQL.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        query: { type: 'string', description: 'Término de búsqueda' },
+        limit: { type: 'number', default: 10 },
+        sessionId: {
+          type: 'string',
+          description: 'Filtrar por sesión (opcional)',
+        },
+      },
+      required: ['query'],
+    },
+  },
 ];
 
 // List Tools Handler
@@ -959,7 +1138,17 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       case 'context_search':
       case 'memory_save':
       case 'memory_search':
-      case 'memory_list': {
+      case 'memory_list':
+      case 'skill_list':
+      case 'skill_search':
+      case 'skill_get':
+      case 'skill_create':
+      case 'skill_patch':
+      case 'skill_apply':
+      case 'memory_inject':
+      case 'memory_l1_write':
+      case 'memory_l1_remove':
+      case 'memory_l2_search': {
         const toolResp = await fetch(`${API_URL}/mcp/execute-tool`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },

@@ -24,8 +24,8 @@ export interface SkillMetadata {
   version: number;
   /** Which agent(s) this skill is relevant to */
   agents?: string[];
-  /** Source of creation: 'auto' | 'manual' | 'patch' */
-  source?: 'auto' | 'manual' | 'patch';
+  /** Source of creation: 'auto' | 'manual' | 'patch' | 'overwrite' */
+  source?: 'auto' | 'manual' | 'patch' | 'overwrite';
 }
 
 /**

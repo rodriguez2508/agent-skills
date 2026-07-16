@@ -25,6 +25,8 @@ import { ContextNodeService } from '@modules/contexts/application/services/conte
 import { ContextService } from '@modules/contexts/application/services/context.service';
 import { ContextType } from '@modules/contexts/domain/entities/context.entity';
 import { SkillFileService } from '@modules/skills/services/skill-file.service';
+import { MemoryFileService } from '@modules/memory/services/memory-file.service';
+import { MemorySearchService } from '@modules/memory/services/memory-search.service';
 import * as path from 'path';
 
 @ApiTags('MCP')
@@ -44,6 +46,8 @@ export class McpController {
     private readonly obsidianVault: ObsidianVaultService,
     private readonly contextNodeService: ContextNodeService,
     private readonly contextService: ContextService,
+    private readonly memoryFileService: MemoryFileService,
+    private readonly memorySearchService: MemorySearchService,
     private readonly skillFileService: SkillFileService,
   ) {}
 
@@ -938,6 +942,58 @@ export class McpController {
         const context = await this.skillFileService.buildSkillsContext(task, args?.limit || 3);
         if (!context) return 'No se encontraron skills relevantes para esta tarea.';
         return context.trim();
+      }
+
+      // ─── Hermes-style Memory Tools (L1 + L2) ──────────────────────
+      case 'memory_inject': {
+        const context = await this.memoryFileService.buildInjectedContext();
+        return context || 'No hay memoria L1 configurada aún. Usa memory_l1_write para agregar entradas.';
+      }
+
+      case 'memory_l1_write': {
+        const { key, content, category, tags, file } = args || {};
+        if (!key || !content) return 'key y content son requeridos.';
+        if (file === 'user') {
+          await this.memoryFileService.addUserEntry({
+            key,
+            content,
+            category: category || 'preference',
+            tags: tags || [],
+          });
+          return `👤 Memoria de usuario guardada: "${key}"`;
+        } else {
+          await this.memoryFileService.addMemoryEntry({
+            key,
+            content,
+            category: category || 'context',
+            tags: tags || [],
+          });
+          return `📝 Memoria del proyecto guardada: "${key}"`;
+        }
+      }
+
+      case 'memory_l1_remove': {
+        const { key: removeKey, file: fileType } = args || {};
+        if (!removeKey) return 'key es requerido.';
+        if (fileType === 'user') {
+          await this.memoryFileService.removeUserEntry(removeKey);
+        } else {
+          await this.memoryFileService.removeMemoryEntry(removeKey);
+        }
+        return `🗑️ Entrada "${removeKey}" eliminada de la memoria.`;
+      }
+
+      case 'memory_l2_search': {
+        const { query, limit } = args || {};
+        if (!query) return 'query es requerido.';
+        const results = await this.memorySearchService.search(query, { limit: limit || 10 });
+        if (results.length === 0) return `No encontré resultados para "${query}".`;
+        let text = `🔍 **${results.length} resultado(s) para "${query}"**\n\n`;
+        for (const r of results) {
+          const icon = r.source === 'chat' ? '💬' : r.source === 'context' ? '📝' : '🧠';
+          text += `${icon} [${(r.score * 100).toFixed(0)}%] ${r.content.substring(0, 150)}${r.content.length > 150 ? '...' : ''}\n`;
+        }
+        return text.trim();
       }
 
       case 'memory_list': {

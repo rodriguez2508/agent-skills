@@ -13,6 +13,7 @@ import {
   SuggestedNext,
 } from '@modules/agents/application/services/pattern.service';
 import { McpPlanService } from '@modules/plans/application/services/mcp-plan.service';
+import { MemoryFileService } from '@modules/memory/services/memory-file.service';
 
 /**
  * RouterAgent - Orquestador principal de agentes
@@ -29,10 +30,11 @@ export class RouterAgent extends BaseAgent {
     private readonly agentCatalog: AgentCatalogService,
     private readonly patternService: PatternService,
     private readonly mcpPlanService: McpPlanService,
+    private readonly memoryFileService: MemoryFileService,
   ) {
     super(
       'RouterAgent',
-      'Orquesta y enruta solicitudes a los agentes especializados',
+      'Orquesta y enruta solicitudes a los agentes especializados, inyectando reglas y memoria L1 automáticamente',
     );
     this.rulesApiUrl = `http://localhost:${process.env.PORT || 8004}/rules/search`;
   }
@@ -67,8 +69,17 @@ export class RouterAgent extends BaseAgent {
       request.options?.language,
     );
 
-    // Prepend system instructions to the input
-    const finalInput = systemInstructions + request.input;
+    // STEP 3: Inject L1 Memory (MEMORY.md + USER.md) — auto-inyectado como Hermes
+    const memoryContext = await this.memoryFileService.buildInjectedContext();
+    if (memoryContext) {
+      this.agentLogger.info(
+        this.agentId,
+        `🧠 [ROUTER] L1 Memory injected: ${memoryContext.split('\n').length} lines`,
+      );
+    }
+
+    // Prepend system instructions + L1 memory to the input
+    const finalInput = systemInstructions + memoryContext + request.input;
 
     if (allRules.length > 0) {
       this.agentLogger.info(

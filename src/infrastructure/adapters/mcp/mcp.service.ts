@@ -16,6 +16,8 @@ import { ContextService } from '@modules/contexts/application/services/context.s
 import { ContextType } from '@modules/contexts/domain/entities/context.entity';
 import { Context7Adapter } from '@infrastructure/adapters/context7/context7.adapter';
 import { SkillFileService } from '@modules/skills/services/skill-file.service';
+import { MemoryFileService } from '@modules/memory/services/memory-file.service';
+import { MemorySearchService } from '@modules/memory/services/memory-search.service';
 import * as fs from 'fs/promises';
 import * as path from 'path';
 import { promisify } from 'util';
@@ -46,6 +48,8 @@ export class McpService {
     private readonly contextService: ContextService,
     private readonly context7Adapter: Context7Adapter,
     private readonly skillFileService: SkillFileService,
+    private readonly memoryFileService: MemoryFileService,
+    private readonly memorySearchService: MemorySearchService,
   ) {
     this.apiPort = this.configService.get<number>('PORT', 8004);
   }
@@ -2302,6 +2306,101 @@ When in doubt, ALWAYS use the agent_query tool first.`,
             return { content: [{ type: 'text' as const, text: 'No se encontraron skills relevantes para esta tarea.' }] };
           }
           return { content: [{ type: 'text' as const, text: context.trim() }] };
+        } catch (error) {
+          const msg = error instanceof Error ? error.message : 'Error';
+          return { content: [{ type: 'text' as const, text: `❌ Error: ${msg}` }], isError: true };
+        }
+      },
+    );
+
+    // ─── Hermes-style Memory Tools (L1 + L2) ───────────────────────
+    // memory_inject — obtiene contexto L1 para inyección
+    server.tool(
+      'memory_inject',
+      'Obtiene el contexto de memoria L1 (MEMORY.md + USER.md) para inyectar en el prompt del sistema. Siempre incluye decisiones del proyecto, preferencias del usuario y contexto persistente.',
+      {},
+      async () => {
+        try {
+          const context = await this.memoryFileService.buildInjectedContext();
+          return { content: [{ type: 'text' as const, text: context || 'No hay memoria L1 configurada.' }] };
+        } catch (error) {
+          const msg = error instanceof Error ? error.message : 'Error';
+          return { content: [{ type: 'text' as const, text: `❌ Error: ${msg}` }], isError: true };
+        }
+      },
+    );
+
+    // memory_l1_write — escribe en MEMORY.md o USER.md
+    server.tool(
+      'memory_l1_write',
+      'Guarda una entrada en la memoria L1. Usa file="user" para preferencias del usuario, file="memory" (default) para conocimiento del proyecto. La memoria se auto-inyecta en el contexto de todas las conversaciones futuras.',
+      {
+        key: z.string().describe('Identificador único de la entrada (ej: "decisión-arquitectura-auth")'),
+        content: z.string().describe('Contenido de la entrada'),
+        category: z.string().optional().describe('Categoría: decision, preference, architecture, context, goal, pattern'),
+        tags: z.array(z.string()).optional().describe('Tags para categorización'),
+        file: z.enum(['memory', 'user']).optional().default('memory').describe('memory=proyecto (MEMORY.md), user=usuario (USER.md)'),
+      },
+      async ({ key, content, category, tags, file }) => {
+        try {
+          if (file === 'user') {
+            await this.memoryFileService.addUserEntry({ key, content, category: category || 'preference', tags: tags || [] });
+          } else {
+            await this.memoryFileService.addMemoryEntry({ key, content, category: category || 'context', tags: tags || [] });
+          }
+          const emoji = file === 'user' ? '👤' : '📝';
+          return { content: [{ type: 'text' as const, text: `${emoji} Memoria guardada: "${key}" en ${file === 'user' ? 'USER.md' : 'MEMORY.md'}` }] };
+        } catch (error) {
+          const msg = error instanceof Error ? error.message : 'Error';
+          return { content: [{ type: 'text' as const, text: `❌ Error: ${msg}` }], isError: true };
+        }
+      },
+    );
+
+    // memory_l1_remove — elimina una entrada
+    server.tool(
+      'memory_l1_remove',
+      'Elimina una entrada de la memoria L1 por su key.',
+      {
+        key: z.string().describe('Key de la entrada a eliminar'),
+        file: z.enum(['memory', 'user']).optional().default('memory').describe('memory=MEMORY.md, user=USER.md'),
+      },
+      async ({ key, file }) => {
+        try {
+          if (file === 'user') {
+            await this.memoryFileService.removeUserEntry(key);
+          } else {
+            await this.memoryFileService.removeMemoryEntry(key);
+          }
+          return { content: [{ type: 'text' as const, text: `🗑️ Entrada "${key}" eliminada.` }] };
+        } catch (error) {
+          const msg = error instanceof Error ? error.message : 'Error';
+          return { content: [{ type: 'text' as const, text: `❌ Error: ${msg}` }], isError: true };
+        }
+      },
+    );
+
+    // memory_l2_search — búsqueda full-text en historial
+    server.tool(
+      'memory_l2_search',
+      'Busca en todo el historial de conversaciones (L2) usando full-text search. Devuelve fragmentos relevantes rankeados por relevancia.',
+      {
+        query: z.string().describe('Término de búsqueda'),
+        limit: z.number().optional().default(10).describe('Máximo de resultados'),
+        sessionId: z.string().optional().describe('Filtrar por sesión (opcional)'),
+      },
+      async ({ query, limit, sessionId }) => {
+        try {
+          const results = await this.memorySearchService.search(query, { limit: limit || 10, sessionId });
+          if (results.length === 0) {
+            return { content: [{ type: 'text' as const, text: `No encontré resultados para "${query}".` }] };
+          }
+          let text = `🔍 **${results.length} resultado(s) para "${query}"**\n\n`;
+          for (const r of results) {
+            const icon = r.source === 'chat' ? '💬' : r.source === 'context' ? '📝' : '🧠';
+            text += `${icon} [${(r.score * 100).toFixed(0)}%] ${r.content.substring(0, 150)}${r.content.length > 150 ? '...' : ''}\n`;
+          }
+          return { content: [{ type: 'text' as const, text: text.trim() }] };
         } catch (error) {
           const msg = error instanceof Error ? error.message : 'Error';
           return { content: [{ type: 'text' as const, text: `❌ Error: ${msg}` }], isError: true };

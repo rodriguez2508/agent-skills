@@ -70,13 +70,14 @@ export class SkillController {
       content: string;
       tags?: string[];
       agents?: string[];
+      overwrite?: boolean;
     },
   ) {
-    const { name, description, content, tags, agents } = body;
+    const { name, description, content, tags, agents, overwrite } = body;
     if (!name || !description || !content) {
       return { success: false, error: 'name, description, and content are required' };
     }
-    const doc = await this.skillFileService.createSkill(name, description, content, tags, agents);
+    const doc = await this.skillFileService.createSkill(name, description, content, tags, agents, overwrite);
     return {
       success: true,
       skill: { name: doc.metadata.name, version: doc.metadata.version },

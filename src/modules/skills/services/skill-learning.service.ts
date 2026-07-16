@@ -25,7 +25,7 @@ export class SkillLearningService {
   private readonly logger = new Logger(SkillLearningService.name);
   private recentEvents: TaskEvent[] = [];
   private readonly MAX_EVENTS = 100;
-  private readonly MIN_PATTERNS_FOR_SKILL = 2;
+  private readonly MIN_PATTERNS_FOR_SKILL = 5;
 
   constructor(private readonly skillFileService: SkillFileService) {}
 
@@ -88,6 +88,7 @@ export class SkillLearningService {
                 this.buildSkillBody(pattern, agentId, events),
                 [agentId.toLowerCase(), 'auto-aprendido', 'learning-loop'],
                 [agentId],
+                true, // overwrite if exists
               );
               this.logger.log(`🧠 Auto-created skill from pattern: ${skillName}`);
             }
@@ -129,6 +130,7 @@ export class SkillLearningService {
           this.buildSkillBody(event.task, event.agentId, [event]),
           [event.agentId.toLowerCase(), 'auto-generado'],
           [event.agentId],
+          true, // overwrite if exists
         );
         this.logger.log(`🧠 Learning loop created skill: ${skillName}`);
       }
