@@ -3,10 +3,10 @@ import * as fs from 'fs/promises';
 import * as fsSync from 'fs';
 import * as path from 'path';
 import which from 'which';
-import { IAgentAdapter, DetectionResult } from '@modules/agents/domain/ports/agent-adapter.port';
-import { SupportTier } from '@modules/agents/domain/value-objects/support-tier.vo';
-import { SystemPromptStrategy } from '@modules/agents/domain/value-objects/system-prompt-strategy.vo';
-import { MCPStrategy } from '@modules/agents/domain/value-objects/mcp-strategy.vo';
+import { IAgentAdapter, DetectionResult } from '@modules/agency-agents/domain/ports/agent-adapter.port';
+import { SupportTier } from '@modules/agency-agents/domain/value-objects/support-tier.vo';
+import { SystemPromptStrategy } from '@modules/agency-agents/domain/value-objects/system-prompt-strategy.vo';
+import { MCPStrategy } from '@modules/agency-agents/domain/value-objects/mcp-strategy.vo';
 
 /**
  * Abstract base class for all agent adapters.
@@ -195,8 +195,15 @@ export abstract class BaseAgentAdapter implements IAgentAdapter {
 
   /**
    * Expands ~ to home directory in a path.
+   * Handles both '~' and '~/' prefixed paths correctly.
    */
   protected expandHome(filePath: string, homeDir: string): string {
+    if (filePath === '~') {
+      return homeDir;
+    }
+    if (filePath.startsWith('~/')) {
+      return path.join(homeDir, filePath.slice(2));
+    }
     if (filePath.startsWith('~')) {
       return path.join(homeDir, filePath.slice(1));
     }

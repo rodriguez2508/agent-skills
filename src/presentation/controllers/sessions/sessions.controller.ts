@@ -34,7 +34,8 @@ import { AgentRegistry } from '@core/agents/agent-registry';
 import { Project } from '@modules/projects/domain/entities/project.entity';
 import { ProjectDetection } from '@modules/projects/application/services/projects.service';
 import { MessageRole } from '@modules/sessions/domain/entities/chat-message.entity';
-import { AgentCatalogService } from '@modules/agents/application/services/agent-catalog.service';
+import { QueryBus } from '@nestjs/cqrs';
+import { GetAgentCatalogQuery } from '@modules/agency-agents/application/queries';
 import { McpPlanService } from '@modules/plans/application/services/mcp-plan.service';
 import { McpPlanStatus } from '@modules/plans/domain/entities/mcp-plan.entity';
 import {
@@ -93,7 +94,7 @@ export class SessionsController {
     private readonly redisIssueContext: RedisIssueContextService,
     private readonly agentRegistry: AgentRegistry,
     private readonly contextNodes: ContextNodeService,
-    private readonly agentCatalog: AgentCatalogService,
+    private readonly queryBus: QueryBus,
     private readonly mcpPlanService: McpPlanService,
   ) {}
 
@@ -590,7 +591,7 @@ export class SessionsController {
       relatedRaw,
       projectHistory,
     ] = await Promise.all([
-      this.agentCatalog.getSummaryForCli(),
+      this.queryBus.execute(new GetAgentCatalogQuery('summary')),
       this.mcpPlanService.findByProject(project.id, McpPlanStatus.IN_PROGRESS),
       this.sessionRepository.findByProjectId(project.id, 5),
       this.projectsService.getRelatedProjects(project.id),

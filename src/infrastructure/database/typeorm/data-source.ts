@@ -47,6 +47,18 @@ export const dataSourceOptions: DataSourceOptions = {
       __dirname,
       '../../../modules/contexts/domain/entities/*.entity{.ts,.js}',
     ),
+    path.join(
+      __dirname,
+      '../../../modules/agencies/domain/entities/*.entity{.ts,.js}',
+    ),
+    path.join(
+      __dirname,
+      '../../../modules/agency-agents/domain/entities/*.entity{.ts,.js}',
+    ),
+    path.join(
+      __dirname,
+      '../../../modules/plans/domain/entities/*.entity{.ts,.js}',
+    ),
   ],
   migrations: [path.join(__dirname, '/migrations/*{.ts,.js}')],
   synchronize: false, // Never use synchronize with migrations

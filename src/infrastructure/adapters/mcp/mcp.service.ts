@@ -15,11 +15,19 @@ import { ProjectsService } from '@modules/projects/application/services/projects
 import { ContextService } from '@modules/contexts/application/services/context.service';
 import { ContextType } from '@modules/contexts/domain/entities/context.entity';
 import { Context7Adapter } from '@infrastructure/adapters/context7/context7.adapter';
-import { SkillFileService } from '@modules/skills/services/skill-file.service';
+import { SkillFileService } from '@core/skills/services/skill-file.service';
 import { MemoryFileService } from '@modules/memory/services/memory-file.service';
 import { MemorySearchService } from '@modules/memory/services/memory-search.service';
-import { InstallService } from '@modules/agents/application/services/install.service';
-import { BackupService } from '@modules/agents/application/services/backup.service';
+import { CommandBus, QueryBus } from '@nestjs/cqrs';
+import {
+  InstallAgentCommand,
+  SyncAgentCommand,
+  CreateBackupCommand,
+  RestoreBackupCommand,
+} from '@modules/agency-agents/application/commands';
+import {
+  GetBackupsQuery,
+} from '@modules/agency-agents/application/queries';
 import { AgentConfigRegistryService } from '@infrastructure/adapters/agent-config/agent-config-registry.service';
 import * as fs from 'fs/promises';
 import * as path from 'path';
@@ -53,8 +61,8 @@ export class McpService {
     private readonly skillFileService: SkillFileService,
     private readonly memoryFileService: MemoryFileService,
     private readonly memorySearchService: MemorySearchService,
-    private readonly installService: InstallService,
-    private readonly backupService: BackupService,
+    private readonly commandBus: CommandBus,
+    private readonly queryBus: QueryBus,
     private readonly agentConfigRegistry: AgentConfigRegistryService,
   ) {
     this.apiPort = this.configService.get<number>('PORT', 8004);
@@ -2538,7 +2546,7 @@ When in doubt, ALWAYS use the agent_query tool first.`,
       },
       async ({ agents, components, skills, persona, dryRun }) => {
         try {
-          const result = await this.installService.execute({ agents, components, skills, persona, dryRun });
+          const result = await this.commandBus.execute(new InstallAgentCommand(agents, components, skills, persona, undefined, dryRun));
           let text = result.dryRun
             ? `🔍 **Dry Run** — Plan de instalación:\n\n`
             : `🚀 **Resultado de instalación:**\n\n`;
@@ -2568,7 +2576,7 @@ When in doubt, ALWAYS use the agent_query tool first.`,
       },
       async ({ agents, components }) => {
         try {
-          const result = await this.installService.sync({ agents, components });
+          const result = await this.commandBus.execute(new SyncAgentCommand(agents, components));
           let text = `🔄 **Resultado de sync:**\n\n`;
           text += `✅ Agentes: ${result.agents.join(', ') || 'ninguno'}\n`;
           if (result.errors.length > 0) {
@@ -2592,13 +2600,13 @@ When in doubt, ALWAYS use the agent_query tool first.`,
       },
       async ({ agents }) => {
         try {
-          const { InstallationProfile } = await import('@modules/agents/domain/entities/installation-profile.entity');
+          const { InstallationProfile } = await import('@modules/agency-agents/domain/entities/installation-profile.entity');
           const profile = InstallationProfile.create(
             `backup-${Date.now()}`,
             agents.map((id: string) => ({ id } as any)),
             [], [], null,
           );
-          const snapshot = await this.backupService.createBackup(profile);
+          const snapshot = await this.commandBus.execute(new CreateBackupCommand(profile));
           const text = `💾 **Backup creado:**\n   ID: \`${snapshot.id}\`\n   Fecha: ${snapshot.timestamp}\n   Tamaño: ${((snapshot.sizeBytes || 0) / 1024).toFixed(1)} KB\n   Hash: ${(snapshot.hash || '').substring(0, 16)}...`;
           return { content: [{ type: 'text' as const, text }] };
         } catch (error) {
@@ -2615,7 +2623,7 @@ When in doubt, ALWAYS use the agent_query tool first.`,
       {},
       async () => {
         try {
-          const backups = await this.backupService.listBackups();
+          const backups = await this.queryBus.execute(new GetBackupsQuery());
           if (backups.length === 0) {
             return { content: [{ type: 'text' as const, text: '📭 No hay backups disponibles.' }] };
           }
@@ -2641,7 +2649,7 @@ When in doubt, ALWAYS use the agent_query tool first.`,
       },
       async ({ backupId }) => {
         try {
-          await this.backupService.restoreBackup(backupId);
+          await this.commandBus.execute(new RestoreBackupCommand(backupId));
           const text = `♻️ Backup **${backupId.substring(0, 12)}...** restaurado exitosamente.`;
           return { content: [{ type: 'text' as const, text }] };
         } catch (error) {

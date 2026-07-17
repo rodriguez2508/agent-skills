@@ -1,5 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { IAgentAdapter, DetectionResult } from '@modules/agents/domain/ports/agent-adapter.port';
+import { IAgentAdapter, DetectionResult } from '@modules/agency-agents/domain/ports/agent-adapter.port';
 
 /**
  * Registry of all agent adapters.

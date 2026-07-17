@@ -7,6 +7,7 @@ import {
   Logger,
   Body,
   Query,
+  UseGuards,
 } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiBody } from '@nestjs/swagger';
 import { Response, Request } from 'express';
@@ -24,19 +25,30 @@ import { ObsidianVaultService } from '@agents/obsidian/obsidian-vault.service';
 import { ContextNodeService } from '@modules/contexts/application/services/context-node.service';
 import { ContextService } from '@modules/contexts/application/services/context.service';
 import { ContextType } from '@modules/contexts/domain/entities/context.entity';
-import { SkillFileService } from '@modules/skills/services/skill-file.service';
-import { InstallationProfile } from '@modules/agents/domain/entities/installation-profile.entity';
+import { SkillFileService } from '@core/skills/services/skill-file.service';
+import { InstallationProfile } from '@modules/agency-agents/domain/entities/installation-profile.entity';
 import { IssueWorkflowAgent } from '@agents/workflow/issue-workflow.agent';
 import { IssueService } from '@modules/issues/application/services/issue.service';
 import { IssueWorkflowStep } from '@modules/issues/domain/entities/issue.entity';
 import { MemoryFileService } from '@modules/memory/services/memory-file.service';
 import { MemorySearchService } from '@modules/memory/services/memory-search.service';
-import { InstallService } from '@modules/agents/application/services/install.service';
-import { BackupService } from '@modules/agents/application/services/backup.service';
+import { CommandBus, QueryBus } from '@nestjs/cqrs';
+import {
+  InstallAgentCommand,
+  SyncAgentCommand,
+  CreateBackupCommand,
+  RestoreBackupCommand,
+} from '@modules/agency-agents/application/commands';
+import {
+  GetBackupsQuery,
+} from '@modules/agency-agents/application/queries';
 import { AgentConfigRegistryService } from '@infrastructure/adapters/agent-config/agent-config-registry.service';
+import { AuthGuard } from '@modules/auth/guard/auth.guard';
+import { AgencyGuard } from '@modules/agencies/guard/agency.guard';
 import * as path from 'path';
 
 @ApiTags('MCP')
+@UseGuards(AuthGuard, AgencyGuard)
 @Controller('mcp')
 export class McpController {
   private readonly logger = new Logger(McpController.name);
@@ -56,8 +68,8 @@ export class McpController {
     private readonly memoryFileService: MemoryFileService,
     private readonly memorySearchService: MemorySearchService,
     private readonly skillFileService: SkillFileService,
-    private readonly installService: InstallService,
-    private readonly backupService: BackupService,
+    private readonly commandBus: CommandBus,
+    private readonly queryBus: QueryBus,
     private readonly agentConfigRegistry: AgentConfigRegistryService,
     private readonly issueWorkflowAgent: IssueWorkflowAgent,
     private readonly issueService: IssueService,
@@ -1341,13 +1353,9 @@ export class McpController {
         if (!agents || !Array.isArray(agents) || agents.length === 0) {
           return 'Se requiere al menos un agente en "agents".';
         }
-        const result = await this.installService.execute({
-          agents,
-          components,
-          skills,
-          persona,
-          dryRun,
-        });
+        const result = await this.commandBus.execute(
+          new InstallAgentCommand(agents, components, skills, persona, undefined, dryRun),
+        );
         let text = result.dryRun
           ? `🔍 **Dry Run** — Plan de instalación:\n\n`
           : `🚀 **Resultado de instalación:**\n\n`;
@@ -1367,10 +1375,9 @@ export class McpController {
         if (!syncAgents || !Array.isArray(syncAgents) || syncAgents.length === 0) {
           return 'Se requiere al menos un agente en "agents".';
         }
-        const result = await this.installService.sync({
-          agents: syncAgents,
-          components: args?.components,
-        });
+        const result = await this.commandBus.execute(
+          new SyncAgentCommand(syncAgents, args?.components),
+        );
         let text = `🔄 **Resultado de sync:**\n\n`;
         text += `✅ Agentes: ${result.agents.join(', ') || 'ninguno'}\n`;
         if (result.errors.length > 0) {
@@ -1392,12 +1399,12 @@ export class McpController {
           [],
           null,
         );
-        const snapshot = await this.backupService.createBackup(profile);
+        const snapshot = await this.commandBus.execute(new CreateBackupCommand(profile));
         return `💾 **Backup creado:**\n   ID: \`${snapshot.id}\`\n   Fecha: ${snapshot.timestamp}\n   Tamaño: ${((snapshot.sizeBytes || 0) / 1024).toFixed(1)} KB\n   Hash: ${(snapshot.hash || '').substring(0, 16)}...`;
       }
 
       case 'ecosystem_backup_list': {
-        const backups = await this.backupService.listBackups();
+        const backups = await this.queryBus.execute(new GetBackupsQuery());
         if (backups.length === 0) return '📭 No hay backups disponibles.';
         let text = `💾 **Backups disponibles (${backups.length}):**\n\n`;
         for (const b of backups) {
@@ -1410,7 +1417,7 @@ export class McpController {
       case 'ecosystem_backup_restore': {
         const { backupId } = args || {};
         if (!backupId) return 'backupId es requerido';
-        await this.backupService.restoreBackup(backupId);
+        await this.commandBus.execute(new RestoreBackupCommand(backupId));
         return `♻️ Backup **${backupId.substring(0, 12)}...** restaurado exitosamente.`;
       }
 

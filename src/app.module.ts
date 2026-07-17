@@ -55,28 +55,27 @@ import { ObsidianAgent } from '@agents/obsidian/obsidian.agent';
 import { ObsidianVaultService } from '@agents/obsidian/obsidian-vault.service';
 import { ObsidianModule } from '@agents/obsidian/obsidian.module';
 import { RedisIssueContextService } from '@infrastructure/cache/redis-issue-context.service';
-import { AgentCatalogService } from '@modules/agents/application/services/agent-catalog.service';
-import { PatternService } from '@modules/agents/application/services/pattern.service';
+import { AgentCatalogService } from '@modules/agency-agents/application/services/agent-catalog.service';
+import { PatternService } from '@modules/agency-agents/application/services/pattern.service';
 
 // Domain
 import { RULE_REPOSITORY } from '@core/domain/ports/rule-repository.token';
 
 // New Modular Structure
 import { AuthModule } from '@modules/auth/auth.module';
+import { AgenciesModule } from '@modules/agencies/agencies.module';
 import { UsersModule } from '@modules/users/users.module';
 import { SessionsModule } from '@modules/sessions/sessions.module';
 import { IssuesModule } from '@modules/issues/issues.module';
 import { ProjectsModule } from '@modules/projects/projects.module';
 import { ContextsModule } from '@modules/contexts/contexts.module';
 import { PlansModule } from '@modules/plans/plans.module';
-import { AuthController } from '@modules/auth/presentation/controllers/auth.controller';
-
 // Middleware
 import { IpTrackerMiddleware } from '@shared/middleware/ip-tracker.middleware';
 
 // Agent Config Module (Gentle AI migration)
-import { AgentsModule } from '@modules/agents/agents.module';
-import { SkillsModule } from '@modules/skills/skills.module';
+import { CatalogModule } from '@modules/agency-agents/agency-agents.module';
+import { SkillsModule } from '@core/skills/skills.module';
 import { MemoryModule } from '@modules/memory/memory.module';
 
 @Module({
@@ -96,6 +95,7 @@ import { MemoryModule } from '@modules/memory/memory.module';
 
     // New Modular Structure
     AuthModule,
+    AgenciesModule,
     UsersModule,
     SessionsModule,
     IssuesModule,
@@ -108,7 +108,7 @@ import { MemoryModule } from '@modules/memory/memory.module';
     InfrastructureContext7Module,
 
     // Agent Config Module (Gentle AI migration)
-    AgentsModule,
+    CatalogModule,
 
     // Hermes-style Skill System
     SkillsModule,
@@ -124,7 +124,6 @@ import { MemoryModule } from '@modules/memory/memory.module';
     HealthController,
     RulesController,
     McpController,
-    AuthController,
     AgentsController,
     SessionsController,
     TaskBridgeController,

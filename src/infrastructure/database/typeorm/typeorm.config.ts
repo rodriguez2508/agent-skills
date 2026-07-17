@@ -47,11 +47,15 @@ export const createTypeORMConfig = (
       ),
       path.join(
         __dirname,
-        '../../../modules/agents/domain/entities/*.entity{.ts,.js}',
+        '../../../modules/agency-agents/domain/entities/*.entity{.ts,.js}',
       ),
       path.join(
         __dirname,
         '../../../modules/plans/domain/entities/*.entity{.ts,.js}',
+      ),
+      path.join(
+        __dirname,
+        '../../../modules/agencies/domain/entities/*.entity{.ts,.js}',
       ),
     ],
 

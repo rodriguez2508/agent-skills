@@ -1,6 +1,7 @@
 import { NestFactory } from '@nestjs/core';
 import { ValidationPipe } from '@nestjs/common';
 import { SwaggerModule, DocumentBuilder } from '@nestjs/swagger';
+import * as cookieParser from 'cookie-parser';
 import { AppModule } from './app.module';
 import { ExtractIpMiddleware } from '@infrastructure/middleware/extract-ip.middleware';
 
@@ -9,6 +10,7 @@ async function bootstrap() {
 
   // Global middleware
   app.use(ExtractIpMiddleware);
+  app.use(cookieParser());
 
   // Global pipes
   app.useGlobalPipes(
