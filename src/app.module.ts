@@ -13,12 +13,12 @@ import { VectorStorageModule } from '@infrastructure/vector-storage/vector-stora
 import { DatabaseModule } from '@infrastructure/database/database.module';
 
 // Presentation
-import { HealthController } from '@presentation/controllers/health/health.controller';
-import { RulesController } from '@presentation/controllers/rules/rules.controller';
-import { McpController } from '@presentation/controllers/mcp/mcp.controller';
-import { AgentsController } from '@presentation/controllers/agents/agents.controller';
-import { SessionsController } from '@presentation/controllers/sessions/sessions.controller';
-import { TaskBridgeController } from '@presentation/controllers/task-bridge/task-bridge.controller';
+import { HealthController } from '@core/presentation/controllers/health/health.controller';
+import { RulesController } from '@core/presentation/controllers/rules/rules.controller';
+import { McpController } from '@core/presentation/controllers/mcp/mcp.controller';
+import { AgentsController } from '@core/presentation/controllers/agents/agents.controller';
+import { SessionsController } from '@core/presentation/controllers/sessions/sessions.controller';
+import { TaskBridgeController } from '@core/presentation/controllers/task-bridge/task-bridge.controller';
 
 // Application Handlers (CQRS)
 import { SearchRulesHandler } from '@application/queries/search-rules/search-rules.handler';
@@ -55,8 +55,7 @@ import { ObsidianAgent } from '@agents/obsidian/obsidian.agent';
 import { ObsidianVaultService } from '@agents/obsidian/obsidian-vault.service';
 import { ObsidianModule } from '@agents/obsidian/obsidian.module';
 import { RedisIssueContextService } from '@infrastructure/cache/redis-issue-context.service';
-import { AgentCatalogService } from '@modules/agency-agents/application/services/agent-catalog.service';
-import { PatternService } from '@modules/agency-agents/application/services/pattern.service';
+
 
 // Domain
 import { RULE_REPOSITORY } from '@core/domain/ports/rule-repository.token';
@@ -77,6 +76,7 @@ import { IpTrackerMiddleware } from '@shared/middleware/ip-tracker.middleware';
 import { CatalogModule } from '@modules/agency-agents/agency-agents.module';
 import { SkillsModule } from '@core/skills/skills.module';
 import { MemoryModule } from '@modules/memory/memory.module';
+import { AgencyResourcesModule } from '@modules/agency-resources/agency-resources.module';
 
 @Module({
   imports: [
@@ -119,6 +119,9 @@ import { MemoryModule } from '@modules/memory/memory.module';
     // New Agent Integrations
     GraphifyModule,
     ObsidianModule,
+
+    // Agency Resources (skills, rules, agents, workflows per agency)
+    AgencyResourcesModule,
   ],
   controllers: [
     HealthController,
@@ -167,8 +170,6 @@ import { MemoryModule } from '@modules/memory/memory.module';
 
     // Services
     RedisIssueContextService,
-    AgentCatalogService,
-    PatternService,
 
     // CQRS Handlers
     SearchRulesHandler,

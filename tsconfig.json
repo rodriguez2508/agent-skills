@@ -20,11 +20,12 @@
     "paths": {
       "@core/*": ["src/core/*"],
       "@application/*": ["src/application/*"],
-      "@infrastructure/*": ["src/infrastructure/*"],
-      "@presentation/*": ["src/presentation/*"],
+      "@infrastructure/*": ["src/core/infrastructure/*"],
+      "@presentation/*": ["src/core/presentation/*"],
       "@agents/*": ["src/core/agents/*"],
       "@modules/*": ["src/modules/*"],
-      "@shared/*": ["src/shared/*"]
+      "@shared/*": ["src/shared/*"],
+      "@agency-resources/*": ["src/modules/agency-resources/*"]
     }
   },
   "include": ["src/**/*", "scripts/**/*"],

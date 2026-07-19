@@ -19,6 +19,10 @@ import {
 } from 'typeorm';
 import { AgencyMember } from './agency-member.entity';
 import { AgencyTemplate } from './agency-template.entity';
+import { AgencySkill } from '@agency-resources/domain/entities/agency-skill.entity';
+import { AgencyRule } from '@agency-resources/domain/entities/agency-rule.entity';
+import { AgencyAgent } from '@agency-resources/domain/entities/agency-agent.entity';
+import { AgencyWorkflow } from '@agency-resources/domain/entities/agency-workflow.entity';
 
 export enum AgencyPlanTier {
   FREE = 'free',
@@ -80,6 +84,18 @@ export class Agency {
     cascade: true,
   })
   templates?: AgencyTemplate[];
+
+  @OneToMany(() => AgencySkill, (skill) => skill.agency, { cascade: true })
+  skills?: AgencySkill[];
+
+  @OneToMany(() => AgencyRule, (rule) => rule.agency, { cascade: true })
+  rules?: AgencyRule[];
+
+  @OneToMany(() => AgencyAgent, (agent) => agent.agency, { cascade: true })
+  agents?: AgencyAgent[];
+
+  @OneToMany(() => AgencyWorkflow, (workflow) => workflow.agency, { cascade: true })
+  workflows?: AgencyWorkflow[];
 
   @CreateDateColumn({ name: 'created_at' })
   createdAt: Date;
