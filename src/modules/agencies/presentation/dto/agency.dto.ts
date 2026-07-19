@@ -20,6 +20,7 @@ export interface CreateAgencyRequestDto {
 
 export interface UpdateAgencyRequestDto {
   name?: string;
+  slug?: string;
   description?: string;
   logo?: string;
   isPublic?: boolean;
@@ -86,6 +87,10 @@ export interface AgencyMemberDto {
   role: string;
   permissions?: Record<string, any>;
   createdAt: Date;
+  userName?: string;
+  userEmail?: string;
+  userAvatar?: string;
+  lastIpAddress?: string;
 }
 
 export interface AgencyTemplateDto {

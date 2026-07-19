@@ -76,6 +76,8 @@ export abstract class IUserRepository {
 
   abstract incrementSearchCount(userId: string): Promise<any>;
 
+  abstract searchByEmailOrName(query: string, limit?: number): Promise<any[]>;
+
   abstract findAll(limit?: number): Promise<any[]>;
 
   abstract findActive(limit?: number): Promise<any[]>;

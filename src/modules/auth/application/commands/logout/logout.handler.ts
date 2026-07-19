@@ -24,28 +24,25 @@ export class LogoutHandler implements ICommandHandler<LogoutCommand> {
   ) {}
 
   async execute(command: LogoutCommand) {
-    try {
-      const { refreshToken } = command;
+    const { refreshToken } = command;
 
-      // Verify refresh token to get userId
+    // Try to verify the refresh token to get userId for cleanup.
+    // If verification fails (expired, rotated, or secret mismatch),
+    // still return success — the cookie will be cleared by the controller.
+    try {
       const refreshPayload = (await this.jwtService.verifyAsync(refreshToken, {
         secret: getJwtConfig(this.configService).refreshSecret,
       })) as RefreshTokenPayload;
 
-      // Delete the refresh token from storage
       await this.refreshTokenRepository.deleteRefreshToken(
         refreshPayload.userId,
       );
 
-      this.logger.log(`✅ User logged out: ${refreshPayload.userId}`);
-
-      return { message: 'Logged out successfully' };
+      this.logger.log(`User logged out: ${refreshPayload.userId}`);
     } catch (error) {
-      if (error instanceof UnauthorizedException) {
-        throw error;
-      }
-      this.logger.error(`Logout failed: ${error.message}`, error.stack);
-      throw new InternalServerErrorException('Error logging out');
+      this.logger.debug(`Logout cleanup skipped: ${error.message}`);
     }
+
+    return { message: 'Logged out successfully' };
   }
 }

@@ -10,7 +10,7 @@
 import { NestFactory } from '@nestjs/core';
 import { AppModule } from '../src/app.module';
 import { SessionRepository } from '../src/modules/sessions/infrastructure/persistence/session.repository';
-import { RedisService } from '../src/infrastructure/database/redis/redis.service';
+import { RedisService } from '../src/core/infrastructure/database/redis/redis.service';
 import { MessageRole } from '../src/modules/sessions/domain/entities/chat-message.entity';
 
 async function bootstrap() {

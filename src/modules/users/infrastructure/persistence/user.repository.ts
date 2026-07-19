@@ -33,6 +33,18 @@ export class UserRepository implements IUserRepository {
   }
 
   /**
+   * Normalize IP address for consistent lookups.
+   * Both ::1 and ::ffff:127.0.0.1 resolve to 127.0.0.1
+   */
+  private normalizeIp(ip: string): string {
+    if (!ip || ip === 'unknown') return ip;
+    if (ip === '::1') return '127.0.0.1';
+    const ipv4Match = ip.match(/^::ffff:(\d+\.\d+\.\d+\.\d+)$/);
+    if (ipv4Match) return ipv4Match[1];
+    return ip;
+  }
+
+  /**
    * Find or create user by IP address
    * Users are grouped by IP - same IP = same user
    * Uses transaction with retry to prevent race conditions
@@ -44,19 +56,20 @@ export class UserRepository implements IUserRepository {
     avatar?: string;
     password?: string;
   }): Promise<FindUserByIpResult> {
+    const normalizedIp = this.normalizeIp(data.ipAddress);
     const maxRetries = 3;
     let lastError: Error | null = null;
 
     for (let attempt = 1; attempt <= maxRetries; attempt++) {
       try {
-        // Try to find existing user by IP
+        // Try to find existing user by normalized IP
         const user = await this.repository.findOne({
-          where: { lastIpAddress: data.ipAddress },
+          where: { lastIpAddress: normalizedIp },
         });
 
         if (user) {
           this.logger.debug(
-            `👤 User found by IP: ${user.id} (${data.ipAddress})`,
+            `👤 User found by IP: ${user.id} (${normalizedIp})`,
           );
           return { user, isNew: false };
         }
@@ -66,13 +79,13 @@ export class UserRepository implements IUserRepository {
           email:
             data.email ||
             `user_${Date.now()}_${Math.random().toString(36).substring(2, 8)}@anonymous.local`,
-          name: data.name,
+          name: data.name || `CLI User (${normalizedIp})`,
           avatar: data.avatar,
           password: data.password,
-          lastIpAddress: data.ipAddress,
-          ipAddressHistory: [data.ipAddress],
+          lastIpAddress: normalizedIp,
+          ipAddressHistory: [normalizedIp],
           active: true,
-          emailVerified: !!data.email, // If email is provided, mark as verified
+          emailVerified: !!data.email,
           preferences: {},
           totalSessions: 0,
           totalSearches: 0,
@@ -80,7 +93,7 @@ export class UserRepository implements IUserRepository {
 
         const savedUser = await this.repository.save(newUser);
         this.logger.debug(
-          `✨ New user created for IP ${data.ipAddress}: ${savedUser.id}`,
+          `✨ New user created for IP ${normalizedIp}: ${savedUser.id}`,
         );
 
         return { user: savedUser, isNew: true };
@@ -381,6 +394,19 @@ export class UserRepository implements IUserRepository {
       take: limit,
       order: { lastIpAddress: 'ASC' },
     });
+  }
+
+  /**
+   * Search users by email or name (ILIKE)
+   */
+  async searchByEmailOrName(query: string, limit = 20): Promise<User[]> {
+    const qb = this.repository.createQueryBuilder('user')
+      .select(['user.id', 'user.email', 'user.name', 'user.avatar'])
+      .where('user.email ILIKE :q OR user.name ILIKE :q', { q: `%${query}%` })
+      .take(limit)
+      .orderBy('user.name', 'ASC');
+
+    return qb.getMany();
   }
 
   /**

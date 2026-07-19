@@ -10,12 +10,13 @@
  * Session-based auth uses PostgreSQL sessions table.
  */
 
-import { Module, Provider } from '@nestjs/common';
+import { Module, Provider, forwardRef } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { JwtModule } from '@nestjs/jwt';
 import { CqrsModule } from '@nestjs/cqrs';
 import { UsersModule } from '@modules/users/users.module';
 import { SessionsModule } from '@modules/sessions/sessions.module';
+import { AgenciesModule } from '@modules/agencies/agencies.module';
 
 // Controllers
 import { AuthController } from './presenters/controllers/auth.controller';
@@ -31,6 +32,7 @@ import {
   LoginHandler,
   LoginWithGoogleHandler,
   RegisterHandler,
+  CompleteRegistrationHandler,
   RefreshTokenHandler,
   LogoutHandler,
   SessionLoginHandler,
@@ -66,6 +68,7 @@ const commands: Provider[] = [
   LoginHandler,
   LoginWithGoogleHandler,
   RegisterHandler,
+  CompleteRegistrationHandler,
   RefreshTokenHandler,
   LogoutHandler,
   SessionLoginHandler,
@@ -91,6 +94,7 @@ const guards: Provider[] = [AuthGuard, SessionGuard, RefreshGuard];
     CqrsModule,
     UsersModule,
     SessionsModule,
+    forwardRef(() => AgenciesModule),
     JwtConfigModule,
   ],
   controllers: [AuthController],

@@ -65,6 +65,16 @@ export class AgencyRepository implements IAgencyRepository {
     });
   }
 
+  async findAgenciesByMemberId(userId: string): Promise<Agency[]> {
+    const memberships = await this.memberRepo.find({
+      where: { userId },
+      relations: ['agency'],
+    });
+    return memberships
+      .map((m) => m.agency)
+      .filter(Boolean) as Agency[];
+  }
+
   async findAll(limit = 50): Promise<Agency[]> {
     return this.agencyRepo.find({
       take: limit,

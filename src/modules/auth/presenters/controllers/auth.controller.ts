@@ -25,6 +25,7 @@ import {
   LoginCommand,
   LoginWithGoogleCommand,
   RegisterCommand,
+  CompleteRegistrationCommand,
   RefreshTokenCommand,
   LogoutCommand,
   SessionLoginCommand,
@@ -36,6 +37,7 @@ import { VerifyTokenQuery } from '../../application/queries';
 // DTOs
 import { LoginDto, LoginGoogleDto, SessionLoginDto } from '../../dto/login.dto';
 import { RegisterDto } from '../../dto/register.dto';
+import { CompleteRegistrationDto } from '../../dto/complete-registration.dto';
 
 // Guards
 import { AuthGuard } from '../../guard/auth.guard';
@@ -58,6 +60,29 @@ export class AuthController {
   // ───────────────────────────────
   //  JWT Auth Endpoints (Web)
   // ───────────────────────────────
+
+  @Post('register/complete')
+  async registerComplete(
+    @Body() dto: CompleteRegistrationDto,
+    @Ip() ipAddress: string,
+    @Req() request: Request,
+    @Res() response: Response,
+  ) {
+    this.logger.log(`📝 Complete registration: ${dto.agencyName}`);
+
+    const result = await this.commandBus.execute(
+      new CompleteRegistrationCommand(dto, ipAddress),
+    );
+
+    // Set refresh token as httpOnly cookie
+    response.cookie('refreshToken', result.refreshToken, getCookieOptions(request));
+
+    response.status(201).json({
+      accessToken: result.accessToken,
+      user: result.user,
+      agency: result.agency,
+    });
+  }
 
   @Post('register')
   async register(

@@ -17,20 +17,7 @@ import {
 } from '../../../domain/entities/auth.entity';
 import { getJwtConfig } from '../../../const/jwt.constants';
 import { OAuth2Client } from 'google-auth-library';
-
-/**
- * Google token verification response payload
- */
-interface GoogleTokenPayload {
-  sub: string;
-  name: string;
-  given_name?: string;
-  family_name?: string;
-  picture?: string;
-  email: string;
-  email_verified: boolean;
-  locale?: string;
-}
+import { verifyGoogleToken, GoogleTokenPayload } from '../../../utils/google-token-verifier';
 
 @CommandHandler(LoginWithGoogleCommand)
 export class LoginWithGoogleHandler
@@ -38,6 +25,7 @@ export class LoginWithGoogleHandler
 {
   private readonly logger = new Logger(LoginWithGoogleHandler.name);
   private readonly googleClientId: string;
+  private readonly googleClientSecret: string;
   private readonly oauthClient: OAuth2Client;
 
   constructor(
@@ -48,12 +36,24 @@ export class LoginWithGoogleHandler
     private readonly refreshTokenRepository: RefreshTokenRepository,
   ) {
     this.googleClientId = this.configService.get<string>('GOOGLE_CLIENT_ID') || '';
+    this.googleClientSecret = this.configService.get<string>('GOOGLE_CLIENT_SECRET') || '';
 
     if (!this.googleClientId) {
       this.logger.warn('GOOGLE_CLIENT_ID is not configured. Google login will fail.');
     }
 
-    this.oauthClient = new OAuth2Client(this.googleClientId);
+    this.oauthClient = new OAuth2Client({
+      clientId: this.googleClientId,
+      clientSecret: this.googleClientSecret || undefined,
+    });
+  }
+
+  private normalizeIp(ip: string): string {
+    if (!ip || ip === 'unknown') return ip;
+    if (ip === '::1') return '127.0.0.1';
+    const ipv4Match = ip.match(/^::ffff:(\d+\.\d+\.\d+\.\d+)$/);
+    if (ipv4Match) return ipv4Match[1];
+    return ip;
   }
 
   async execute(command: LoginWithGoogleCommand) {
@@ -61,10 +61,18 @@ export class LoginWithGoogleHandler
       const { loginGoogleDto, ipAddress } = command;
       const { googleToken } = loginGoogleDto;
 
-      this.logger.debug(`Verifying Google token from IP: ${ipAddress}...`);
+      // Normalize IP for consistent lookups (::1 → 127.0.0.1, ::ffff:x → x)
+      const normalizedIp = this.normalizeIp(ipAddress);
 
-      // Verify Google token
-      const googleUserInfo = await this.verifyGoogleToken(googleToken);
+      this.logger.debug(`Verifying Google token from IP: ${normalizedIp}...`);
+
+      // Verify Google token (remote with local fallback)
+      const googleUserInfo = await verifyGoogleToken(
+        this.oauthClient,
+        googleToken,
+        this.googleClientId,
+        this.logger,
+      );
 
       this.logger.log(
         `Google token verified for: ${googleUserInfo.email} (${googleUserInfo.name})`,
@@ -90,7 +98,7 @@ export class LoginWithGoogleHandler
       } else {
         // 2. Try to find by IP (user previously used CLI)
         const { user: ipUser, isNew } = await this.userRepository.findByIpOrCreate({
-          ipAddress,
+          ipAddress: normalizedIp,
           email: email,
           name: googleUserInfo.name,
           avatar: googleUserInfo.picture,
@@ -172,52 +180,6 @@ export class LoginWithGoogleHandler
       }
       throw new InternalServerErrorException(
         'An unexpected error occurred during Google login.',
-      );
-    }
-  }
-
-  /**
-   * Verifies Google ID token using the official google-auth-library
-   */
-  private async verifyGoogleToken(token: string): Promise<GoogleTokenPayload> {
-    try {
-      const ticket = await this.oauthClient.verifyIdToken({
-        idToken: token,
-        audience: this.googleClientId,
-      });
-
-      const payload = ticket.getPayload();
-
-      if (!payload) {
-        throw new UnauthorizedException('Invalid Google token');
-      }
-
-      return {
-        sub: payload.sub,
-        name: payload.name || '',
-        given_name: payload.given_name,
-        family_name: payload.family_name,
-        picture: payload.picture,
-        email: payload.email || '',
-        email_verified: payload.email_verified || false,
-        locale: payload.locale,
-      };
-    } catch (error) {
-      if (error instanceof UnauthorizedException) {
-        throw error;
-      }
-      this.logger.error(`Google token verification failed: ${error.message}`);
-
-      if (error.message?.includes('Token used too late')) {
-        throw new UnauthorizedException('Google token has expired');
-      }
-
-      if (error.message?.includes('Invalid token')) {
-        throw new UnauthorizedException('Invalid Google token');
-      }
-
-      throw new UnauthorizedException(
-        `Failed to verify Google token: ${error.message}`,
       );
     }
   }

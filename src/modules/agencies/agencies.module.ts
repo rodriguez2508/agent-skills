@@ -10,7 +10,7 @@
  *   Handler → EventBus → Domain Events (for side effects)
  */
 
-import { Module } from '@nestjs/common';
+import { Module, forwardRef } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { CqrsModule } from '@nestjs/cqrs';
 import { AuthModule } from '@modules/auth/auth.module';
@@ -54,7 +54,7 @@ const Guards = [AgencyGuard];
 @Module({
   imports: [
     CqrsModule,
-    AuthModule,
+    forwardRef(() => AuthModule),
     TypeOrmModule.forFeature([Agency, AgencyMember, AgencyTemplate]),
   ],
   controllers: [AgenciesController],

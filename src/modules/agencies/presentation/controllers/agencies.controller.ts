@@ -57,6 +57,7 @@ import {
 
 // Repository for direct queries (query-only, no service layer)
 import { IAgencyRepository } from '@modules/agencies/domain/ports/agency-repository.port';
+import { UserRepository } from '@modules/users/infrastructure/persistence/user.repository';
 
 @Controller('agencies')
 export class AgenciesController {
@@ -66,6 +67,7 @@ export class AgenciesController {
     private readonly commandBus: CommandBus,
     private readonly queryBus: QueryBus,
     private readonly agencyRepository: IAgencyRepository,
+    private readonly userRepository: UserRepository,
   ) {}
 
   // ───────────────────────────────
@@ -108,6 +110,18 @@ export class AgenciesController {
     return agencies.map(toAgencyResponse);
   }
 
+  @Get('by-user/:userId')
+  async getAgencyByUserId(
+    @Param('userId', ParseUUIDPipe) userId: string,
+  ): Promise<AgencyResponseDto> {
+    this.logger.log(`GET /agencies/by-user/${userId}`);
+    const agencies = await this.agencyRepository.findByOwnerId(userId);
+    if (!agencies.length) {
+      throw new NotFoundException(`No agency found for user ${userId}`);
+    }
+    return toAgencyResponse(agencies[0]);
+  }
+
   @Get(':identifier')
   async getAgency(
     @Param('identifier') identifier: string,
@@ -125,7 +139,22 @@ export class AgenciesController {
         new GetAgencyQuery(identifier, false),
       );
     }
-    return toAgencyDetailResponse(result.agency, result.members, result.templates);
+    const response = toAgencyDetailResponse(result.agency, result.members, result.templates);
+
+    // Enrich members with user data
+    const userIds = [...new Set(result.members.map(m => m.userId))];
+    const users = await Promise.all(userIds.map(id => this.userRepository.findById(id)));
+    const userMap = new Map(users.filter(Boolean).map(u => [u!.id, u!]));
+
+    response.members = response.members.map(m => ({
+      ...m,
+      userName: userMap.get(m.userId)?.name,
+      userEmail: userMap.get(m.userId)?.email,
+      userAvatar: userMap.get(m.userId)?.avatar,
+      lastIpAddress: userMap.get(m.userId)?.lastIpAddress,
+    }));
+
+    return response;
   }
 
   @Patch(':id')
@@ -136,6 +165,7 @@ export class AgenciesController {
     // Map only the fields that are allowed to be updated
     const updateData: Record<string, any> = {};
     if (body.name !== undefined) updateData.name = body.name;
+    if (body.slug !== undefined) updateData.slug = body.slug;
     if (body.description !== undefined) updateData.description = body.description;
     if (body.logo !== undefined) updateData.logo = body.logo;
     if (body.isPublic !== undefined) updateData.isPublic = body.isPublic;
@@ -157,6 +187,7 @@ export class AgenciesController {
   // ───────────────────────────────
 
   @Post(':id/members')
+  @UseGuards(AuthGuard)
   @HttpCode(HttpStatus.CREATED)
   async addMember(
     @Param('id', ParseUUIDPipe) id: string,
@@ -176,6 +207,7 @@ export class AgenciesController {
   }
 
   @Delete(':id/members/:userId')
+  @UseGuards(AuthGuard)
   @HttpCode(HttpStatus.NO_CONTENT)
   async removeMember(
     @Param('id', ParseUUIDPipe) id: string,

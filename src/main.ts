@@ -22,9 +22,11 @@ async function bootstrap() {
   );
 
   // CORS
+  const corsOrigin = process.env.CORS_ORIGIN || 'http://localhost:4200';
   app.enableCors({
-    origin: process.env.CORS_ORIGIN || '*',
+    origin: corsOrigin,
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH'],
+    credentials: true,
   });
 
   // Swagger

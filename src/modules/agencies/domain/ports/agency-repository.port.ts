@@ -42,6 +42,7 @@ export abstract class IAgencyRepository {
   abstract findById(id: string): Promise<Agency | null>;
   abstract findBySlug(slug: string): Promise<Agency | null>;
   abstract findByOwnerId(ownerId: string): Promise<Agency[]>;
+  abstract findAgenciesByMemberId(userId: string): Promise<Agency[]>;
   abstract findAll(limit?: number): Promise<Agency[]>;
   abstract findPublic(limit?: number): Promise<Agency[]>;
   abstract update(id: string, data: Partial<Agency>): Promise<Agency>;

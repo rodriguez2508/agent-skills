@@ -1,18 +1,6 @@
-import { Controller, Get, Post, Body, Param, Logger } from '@nestjs/common';
-import { CommandBus, QueryBus } from '@nestjs/cqrs';
+import { Controller, Get, Param, Logger } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse } from '@nestjs/swagger';
 import { AgentConfigRegistryService } from '@infrastructure/adapters/agent-config/agent-config-registry.service';
-
-// CQRS Commands
-import {
-  InstallAgentCommand,
-  SyncAgentCommand,
-  UpdateClaudeMdCommand,
-} from '../../application/commands';
-
-// DTOs
-import { InstallAgentDto } from '../dto/install-agent.dto';
-import { SyncAgentDto } from '../dto/sync-agent.dto';
 import { DetectionResponseDto } from '../dto/detection-response.dto';
 
 /**
@@ -27,8 +15,6 @@ export class AgentConfigController {
   private readonly logger = new Logger(AgentConfigController.name);
 
   constructor(
-    private readonly commandBus: CommandBus,
-    private readonly queryBus: QueryBus,
     private readonly registry: AgentConfigRegistryService,
   ) {}
 
@@ -79,31 +65,6 @@ export class AgentConfigController {
     }));
   }
 
-  @Post('install')
-  @ApiOperation({ summary: 'Install Gentle AI ecosystem into selected agents' })
-  @ApiResponse({ status: 200, description: 'Installation result' })
-  async install(@Body() dto: InstallAgentDto) {
-    this.logger.log(`Install request: agents=${dto.agents.join(', ')}, dryRun=${dto.dryRun ?? false}`);
-    return this.commandBus.execute(
-      new InstallAgentCommand(
-        dto.agents,
-        dto.components,
-        dto.skills,
-        dto.persona,
-        dto.mcpServers,
-        dto.dryRun,
-      ),
-    );
-  }
-
-  @Post('sync')
-  @ApiOperation({ summary: 'Sync managed assets to current version' })
-  @ApiResponse({ status: 200, description: 'Sync result' })
-  async sync(@Body() dto: SyncAgentDto) {
-    this.logger.log(`Sync request: agents=${dto.agents.join(', ')}`);
-    return this.commandBus.execute(new SyncAgentCommand(dto.agents, dto.components));
-  }
-
   @Get('skills')
   @ApiOperation({ summary: 'List available skills' })
   @ApiResponse({ status: 200, description: 'List of available skills' })
@@ -122,20 +83,5 @@ export class AgentConfigController {
       { id: 'minimal', name: 'Minimal' },
       { id: 'custom', name: 'Custom' },
     ];
-  }
-
-  @Post('update-claude-md')
-  @ApiOperation({ summary: 'Actualiza la sección gentle-ai en ~/.claude/CLAUDE.md preservando contenido del usuario' })
-  async updateClaudeMd(
-    @Body() body: { targetPath?: string } = {},
-  ): Promise<{ success: boolean; result?: any; error?: string }> {
-    try {
-      const result = await this.commandBus.execute(new UpdateClaudeMdCommand(body.targetPath));
-      this.logger.log(`✅ CLAUDE.md updated via API | ${result.path}`);
-      return { success: true, result };
-    } catch (error) {
-      this.logger.error(`❌ Failed to update CLAUDE.md: ${error.message}`);
-      return { success: false, error: error.message };
-    }
   }
 }
