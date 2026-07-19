@@ -30,8 +30,7 @@ import { InstallationProfile } from '@modules/agency-agents/domain/entities/inst
 import { IssueWorkflowAgent } from '@agents/workflow/issue-workflow.agent';
 import { IssueService } from '@modules/issues/application/services/issue.service';
 import { IssueWorkflowStep } from '@modules/issues/domain/entities/issue.entity';
-import { MemoryFileService } from '@modules/memory/services/memory-file.service';
-import { MemorySearchService } from '@modules/memory/services/memory-search.service';
+import { ContextRepository } from '@modules/contexts/infrastructure/persistence/context.repository';
 import { CommandBus, QueryBus } from '@nestjs/cqrs';
 import {
   CreateBackupCommand,
@@ -63,8 +62,7 @@ export class McpController {
     private readonly obsidianVault: ObsidianVaultService,
     private readonly contextNodeService: ContextNodeService,
     private readonly contextService: ContextService,
-    private readonly memoryFileService: MemoryFileService,
-    private readonly memorySearchService: MemorySearchService,
+    private readonly contextRepository: ContextRepository,
     private readonly skillFileService: SkillFileService,
     private readonly commandBus: CommandBus,
     private readonly queryBus: QueryBus,
@@ -1154,6 +1152,7 @@ export class McpController {
           ? args.tags.split(',').map((t) => t.trim())
           : [];
         const context = await this.contextService.createContext({
+          projectId,
           type: ContextType.MEMORY,
           summary: key,
           extractedInfo: {
@@ -1173,12 +1172,7 @@ export class McpController {
         if (!memQuery) return 'Especifica un query de búsqueda.';
         const memProjectId = await this.resolveProjectId(args?.projectPath);
         if (!memProjectId) return 'No se pudo resolver el proyecto.';
-        const repo = this.contextService['contextRepository'].getRepository();
-        const memories = await repo.find({
-          where: { type: ContextType.MEMORY as any, isActive: true },
-          order: { updatedAt: 'DESC' },
-          take: 50,
-        });
+        const memories = await this.contextRepository.findByProjectId(memProjectId, ContextType.MEMORY);
         const lowerQuery = memQuery.toLowerCase();
         const filtered = memories
           .filter(
@@ -1272,54 +1266,82 @@ export class McpController {
         return context.trim();
       }
 
-      // ─── Hermes-style Memory Tools (L1 + L2) ──────────────────────
+      // ─── Memory Tools (DB-backed, per-project) ──────────────────────
       case 'memory_inject': {
-        const context = await this.memoryFileService.buildInjectedContext();
-        return context || 'No hay memoria L1 configurada aún. Usa memory_l1_write para agregar entradas.';
+        const memProjectId = await this.resolveProjectId(args?.projectPath);
+        if (!memProjectId) return 'No se pudo resolver el proyecto.';
+        const entries = await this.contextRepository.findByProjectId(memProjectId, ContextType.MEMORY);
+        if (entries.length === 0) return 'No hay memoria configurada para este proyecto.';
+        const sections: string[] = ['', '─── MEMORIA DEL PROYECTO ───', ''];
+        for (const entry of entries) {
+          const info = entry.extractedInfo || {};
+          sections.push(`### ${info.key || entry.summary || 'entry'}`);
+          sections.push(`📅 ${entry.createdAt} | 🏷️ ${(info.tags || []).join(', ')}`);
+          sections.push(info.content || entry.summary || '');
+          sections.push('');
+        }
+        sections.push('─── Fin Memoria ───');
+        return sections.join('\n');
       }
 
       case 'memory_l1_write': {
-        const { key, content, category, tags, file } = args || {};
+        const writeProjectId = await this.resolveProjectId(args?.projectPath);
+        if (!writeProjectId) return 'No se pudo resolver el proyecto.';
+        const { key, content, category, tags } = args || {};
         if (!key || !content) return 'key y content son requeridos.';
-        if (file === 'user') {
-          await this.memoryFileService.addUserEntry({
-            key,
-            content,
-            category: category || 'preference',
-            tags: tags || [],
+        const existing = await this.contextRepository.findByProjectId(writeProjectId, ContextType.MEMORY);
+        const duplicate = existing.find(e => e.extractedInfo?.key === key);
+        if (duplicate) {
+          await this.contextRepository.update(duplicate.id, {
+            extractedInfo: { ...duplicate.extractedInfo, content, category: category || 'context', tags: tags || [], updatedAt: new Date().toISOString() },
           });
-          return `👤 Memoria de usuario guardada: "${key}"`;
         } else {
-          await this.memoryFileService.addMemoryEntry({
-            key,
-            content,
-            category: category || 'context',
-            tags: tags || [],
+          await this.contextRepository.create({
+            projectId: writeProjectId,
+            type: ContextType.MEMORY,
+            summary: key,
+            extractedInfo: { type: 'memory', key, content, category: category || 'context', tags: tags || [], savedAt: new Date().toISOString() },
           });
-          return `📝 Memoria del proyecto guardada: "${key}"`;
         }
+        return `📝 Memoria guardada: "${key}"`;
       }
 
       case 'memory_l1_remove': {
-        const { key: removeKey, file: fileType } = args || {};
+        const rmProjectId = await this.resolveProjectId(args?.projectPath);
+        if (!rmProjectId) return 'No se pudo resolver el proyecto.';
+        const { key: removeKey } = args || {};
         if (!removeKey) return 'key es requerido.';
-        if (fileType === 'user') {
-          await this.memoryFileService.removeUserEntry(removeKey);
-        } else {
-          await this.memoryFileService.removeMemoryEntry(removeKey);
-        }
-        return `🗑️ Entrada "${removeKey}" eliminada de la memoria.`;
+        const rmEntries = await this.contextRepository.findByProjectId(rmProjectId, ContextType.MEMORY);
+        const target = rmEntries.find(e => e.extractedInfo?.key === removeKey);
+        if (!target) return `No se encontró entrada "${removeKey}".`;
+        await this.contextRepository.deactivate(target.id);
+        return `🗑️ Entrada "${removeKey}" eliminada.`;
       }
 
       case 'memory_l2_search': {
+        const searchProjectId = await this.resolveProjectId(args?.projectPath);
+        if (!searchProjectId) return 'No se pudo resolver el proyecto.';
         const { query, limit } = args || {};
         if (!query) return 'query es requerido.';
-        const results = await this.memorySearchService.search(query, { limit: limit || 10 });
-        if (results.length === 0) return `No encontré resultados para "${query}".`;
-        let text = `🔍 **${results.length} resultado(s) para "${query}"**\n\n`;
-        for (const r of results) {
-          const icon = r.source === 'chat' ? '💬' : r.source === 'context' ? '📝' : '🧠';
-          text += `${icon} [${(r.score * 100).toFixed(0)}%] ${r.content.substring(0, 150)}${r.content.length > 150 ? '...' : ''}\n`;
+        const searchEntries = await this.contextRepository.findByProjectId(searchProjectId, ContextType.MEMORY);
+        const term = query.toLowerCase();
+        const scored = searchEntries.map(e => {
+          const text = `${e.summary || ''} ${e.extractedInfo?.content || ''} ${(e.extractedInfo?.tags || []).join(' ')}`.toLowerCase();
+          let score = 0;
+          if (text.includes(term)) score += 0.5;
+          for (const word of term.split(/\s+/)) {
+            if (word.length < 2) continue;
+            const matches = text.match(new RegExp(word.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi'));
+            if (matches) score += 0.1 * matches.length;
+          }
+          return { entry: e, score: Math.min(score, 1) };
+        }).filter(s => s.score > 0).sort((a, b) => b.score - a.score).slice(0, limit || 10);
+        if (scored.length === 0) return `No encontré resultados para "${query}".`;
+        let text = `🔍 **${scored.length} resultado(s) para "${query}"**\n\n`;
+        for (const { entry, score } of scored) {
+          const info = entry.extractedInfo || {};
+          const preview = (info.content || entry.summary || '').substring(0, 150);
+          text += `📝 [${(score * 100).toFixed(0)}%] **${info.key || entry.summary}**: ${preview}${preview.length >= 150 ? '...' : ''}\n`;
         }
         return text.trim();
       }
@@ -1327,12 +1349,7 @@ export class McpController {
       case 'memory_list': {
         const listProjectId = await this.resolveProjectId(args?.projectPath);
         if (!listProjectId) return 'No se pudo resolver el proyecto.';
-        const listRepo =
-          this.contextService['contextRepository'].getRepository();
-        const allMemories = await listRepo.find({
-          where: { type: ContextType.MEMORY as any, isActive: true },
-          order: { updatedAt: 'DESC' },
-        });
+        const allMemories = await this.contextRepository.findByProjectId(listProjectId, ContextType.MEMORY);
         const tagFilter = args?.tag?.toLowerCase();
         const filtered = tagFilter
           ? allMemories.filter((m) => {
@@ -1340,8 +1357,7 @@ export class McpController {
               return tags.some((t) => t.toLowerCase().includes(tagFilter));
             })
           : allMemories;
-        if (filtered.length === 0)
-          return 'No hay memorias guardadas para este proyecto.';
+        if (filtered.length === 0) return 'No hay memorias guardadas para este proyecto.';
         return `🧠 **${filtered.length} memoria(s)**\n\n${filtered
           .map((m, i) => {
             const info = m.extractedInfo || {};
@@ -2443,6 +2459,7 @@ export class McpController {
 
     try {
       await this.contextService.createContext({
+        projectId,
         type: ContextType.MEMORY,
         summary: summary.substring(0, 200),
         extractedInfo: {
@@ -2832,6 +2849,7 @@ export class McpController {
       if (summary || title) {
         try {
           await this.contextService.createContext({
+            projectId,
             type: ContextType.MEMORY,
             summary: `Plan: ${title}`,
             extractedInfo: {

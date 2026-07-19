@@ -16,8 +16,7 @@ import { ContextService } from '@modules/contexts/application/services/context.s
 import { ContextType } from '@modules/contexts/domain/entities/context.entity';
 import { Context7Adapter } from '@infrastructure/adapters/context7/context7.adapter';
 import { SkillFileService } from '@core/skills/services/skill-file.service';
-import { MemoryFileService } from '@modules/memory/services/memory-file.service';
-import { MemorySearchService } from '@modules/memory/services/memory-search.service';
+import { ContextRepository } from '@modules/contexts/infrastructure/persistence/context.repository';
 import { CommandBus, QueryBus } from '@nestjs/cqrs';
 import {
   CreateBackupCommand,
@@ -59,8 +58,7 @@ export class McpService {
     private readonly contextService: ContextService,
     private readonly context7Adapter: Context7Adapter,
     private readonly skillFileService: SkillFileService,
-    private readonly memoryFileService: MemoryFileService,
-    private readonly memorySearchService: MemorySearchService,
+    private readonly contextRepository: ContextRepository,
     private readonly commandBus: CommandBus,
     private readonly queryBus: QueryBus,
     private readonly agentConfigRegistry: AgentConfigRegistryService,
@@ -2500,16 +2498,30 @@ When in doubt, ALWAYS use the agent_query tool first.`,
       },
     );
 
-    // ─── Hermes-style Memory Tools (L1 + L2) ───────────────────────
-    // memory_inject — obtiene contexto L1 para inyección
+    // ─── Memory Tools (DB-backed, per-project) ──────────────────────
+    // memory_inject — obtiene memorias del proyecto para inyección en prompt
     server.tool(
       'memory_inject',
-      'Obtiene el contexto de memoria L1 (MEMORY.md + USER.md) para inyectar en el prompt del sistema. Siempre incluye decisiones del proyecto, preferencias del usuario y contexto persistente.',
-      {},
-      async () => {
+      'Obtiene toda la memoria del proyecto (entradas de tipo memory) para inyectar en el prompt del sistema.',
+      {
+        projectId: z.string().describe('ID del proyecto'),
+      },
+      async ({ projectId }) => {
         try {
-          const context = await this.memoryFileService.buildInjectedContext();
-          return { content: [{ type: 'text' as const, text: context || 'No hay memoria L1 configurada.' }] };
+          const entries = await this.contextRepository.findByProjectId(projectId, ContextType.MEMORY);
+          if (entries.length === 0) {
+            return { content: [{ type: 'text' as const, text: 'No hay memoria configurada para este proyecto.' }] };
+          }
+          const sections: string[] = ['', '─── MEMORIA DEL PROYECTO ───', ''];
+          for (const entry of entries) {
+            const info = entry.extractedInfo || {};
+            sections.push(`### ${info.key || entry.summary || 'entry'}`);
+            sections.push(`📅 ${entry.createdAt} | 🏷️ ${(info.tags || []).join(', ')}`);
+            sections.push(info.content || entry.summary || '');
+            sections.push('');
+          }
+          sections.push('─── Fin Memoria ───');
+          return { content: [{ type: 'text' as const, text: sections.join('\n') }] };
         } catch (error) {
           const msg = error instanceof Error ? error.message : 'Error';
           return { content: [{ type: 'text' as const, text: `❌ Error: ${msg}` }], isError: true };
@@ -2517,26 +2529,34 @@ When in doubt, ALWAYS use the agent_query tool first.`,
       },
     );
 
-    // memory_l1_write — escribe en MEMORY.md o USER.md
+    // memory_l1_write — guarda entrada en contexts table
     server.tool(
       'memory_l1_write',
-      'Guarda una entrada en la memoria L1. Usa file="user" para preferencias del usuario, file="memory" (default) para conocimiento del proyecto. La memoria se auto-inyecta en el contexto de todas las conversaciones futuras.',
+      'Guarda una entrada de memoria para el proyecto. La memoria se auto-inyecta en el contexto de todas las conversaciones futuras.',
       {
+        projectId: z.string().describe('ID del proyecto'),
         key: z.string().describe('Identificador único de la entrada (ej: "decisión-arquitectura-auth")'),
         content: z.string().describe('Contenido de la entrada'),
         category: z.string().optional().describe('Categoría: decision, preference, architecture, context, goal, pattern'),
         tags: z.array(z.string()).optional().describe('Tags para categorización'),
-        file: z.enum(['memory', 'user']).optional().default('memory').describe('memory=proyecto (MEMORY.md), user=usuario (USER.md)'),
       },
-      async ({ key, content, category, tags, file }) => {
+      async ({ projectId, key, content, category, tags }) => {
         try {
-          if (file === 'user') {
-            await this.memoryFileService.addUserEntry({ key, content, category: category || 'preference', tags: tags || [] });
+          const existing = await this.contextRepository.findByProjectId(projectId, ContextType.MEMORY);
+          const duplicate = existing.find(e => e.extractedInfo?.key === key);
+          if (duplicate) {
+            await this.contextRepository.update(duplicate.id, {
+              extractedInfo: { ...duplicate.extractedInfo, content, category: category || 'context', tags: tags || [], updatedAt: new Date().toISOString() },
+            });
           } else {
-            await this.memoryFileService.addMemoryEntry({ key, content, category: category || 'context', tags: tags || [] });
+            await this.contextRepository.create({
+              projectId,
+              type: ContextType.MEMORY,
+              summary: key,
+              extractedInfo: { type: 'memory', key, content, category: category || 'context', tags: tags || [], savedAt: new Date().toISOString() },
+            });
           }
-          const emoji = file === 'user' ? '👤' : '📝';
-          return { content: [{ type: 'text' as const, text: `${emoji} Memoria guardada: "${key}" en ${file === 'user' ? 'USER.md' : 'MEMORY.md'}` }] };
+          return { content: [{ type: 'text' as const, text: `📝 Memoria guardada: "${key}"` }] };
         } catch (error) {
           const msg = error instanceof Error ? error.message : 'Error';
           return { content: [{ type: 'text' as const, text: `❌ Error: ${msg}` }], isError: true };
@@ -2544,21 +2564,22 @@ When in doubt, ALWAYS use the agent_query tool first.`,
       },
     );
 
-    // memory_l1_remove — elimina una entrada
+    // memory_l1_remove — elimina entrada de memoria
     server.tool(
       'memory_l1_remove',
-      'Elimina una entrada de la memoria L1 por su key.',
+      'Elimina una entrada de memoria por su key.',
       {
+        projectId: z.string().describe('ID del proyecto'),
         key: z.string().describe('Key de la entrada a eliminar'),
-        file: z.enum(['memory', 'user']).optional().default('memory').describe('memory=MEMORY.md, user=USER.md'),
       },
-      async ({ key, file }) => {
+      async ({ projectId, key }) => {
         try {
-          if (file === 'user') {
-            await this.memoryFileService.removeUserEntry(key);
-          } else {
-            await this.memoryFileService.removeMemoryEntry(key);
+          const entries = await this.contextRepository.findByProjectId(projectId, ContextType.MEMORY);
+          const target = entries.find(e => e.extractedInfo?.key === key);
+          if (!target) {
+            return { content: [{ type: 'text' as const, text: `No se encontró entrada "${key}".` }] };
           }
+          await this.contextRepository.deactivate(target.id);
           return { content: [{ type: 'text' as const, text: `🗑️ Entrada "${key}" eliminada.` }] };
         } catch (error) {
           const msg = error instanceof Error ? error.message : 'Error';
@@ -2567,25 +2588,39 @@ When in doubt, ALWAYS use the agent_query tool first.`,
       },
     );
 
-    // memory_l2_search — búsqueda full-text en historial
+    // memory_l2_search — búsqueda en memorias del proyecto
     server.tool(
       'memory_l2_search',
-      'Busca en todo el historial de conversaciones (L2) usando full-text search. Devuelve fragmentos relevantes rankeados por relevancia.',
+      'Busca en las memorias del proyecto. Devuelve entradas relevantes.',
       {
+        projectId: z.string().describe('ID del proyecto'),
         query: z.string().describe('Término de búsqueda'),
         limit: z.number().optional().default(10).describe('Máximo de resultados'),
-        sessionId: z.string().optional().describe('Filtrar por sesión (opcional)'),
       },
-      async ({ query, limit, sessionId }) => {
+      async ({ projectId, query, limit }) => {
         try {
-          const results = await this.memorySearchService.search(query, { limit: limit || 10, sessionId });
-          if (results.length === 0) {
+          const entries = await this.contextRepository.findByProjectId(projectId, ContextType.MEMORY);
+          const term = query.toLowerCase();
+          const scored = entries.map(e => {
+            const text = `${e.summary || ''} ${e.extractedInfo?.content || ''} ${(e.extractedInfo?.tags || []).join(' ')}`.toLowerCase();
+            let score = 0;
+            if (text.includes(term)) score += 0.5;
+            for (const word of term.split(/\s+/)) {
+              if (word.length < 2) continue;
+              const matches = text.match(new RegExp(word.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi'));
+              if (matches) score += 0.1 * matches.length;
+            }
+            return { entry: e, score: Math.min(score, 1) };
+          }).filter(s => s.score > 0).sort((a, b) => b.score - a.score).slice(0, limit || 10);
+
+          if (scored.length === 0) {
             return { content: [{ type: 'text' as const, text: `No encontré resultados para "${query}".` }] };
           }
-          let text = `🔍 **${results.length} resultado(s) para "${query}"**\n\n`;
-          for (const r of results) {
-            const icon = r.source === 'chat' ? '💬' : r.source === 'context' ? '📝' : '🧠';
-            text += `${icon} [${(r.score * 100).toFixed(0)}%] ${r.content.substring(0, 150)}${r.content.length > 150 ? '...' : ''}\n`;
+          let text = `🔍 **${scored.length} resultado(s) para "${query}"**\n\n`;
+          for (const { entry, score } of scored) {
+            const info = entry.extractedInfo || {};
+            const preview = (info.content || entry.summary || '').substring(0, 150);
+            text += `📝 [${(score * 100).toFixed(0)}%] **${info.key || entry.summary}**: ${preview}${preview.length >= 150 ? '...' : ''}\n`;
           }
           return { content: [{ type: 'text' as const, text: text.trim() }] };
         } catch (error) {

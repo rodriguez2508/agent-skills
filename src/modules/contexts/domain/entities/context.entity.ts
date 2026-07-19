@@ -59,6 +59,10 @@ export class Context {
     [key: string]: any;
   };
 
+  @Column({ type: 'uuid', name: 'project_id', nullable: true })
+  @Index()
+  projectId?: string;
+
   @Column({ type: 'uuid', name: 'issue_id', nullable: true })
   @Index()
   issueId?: string;

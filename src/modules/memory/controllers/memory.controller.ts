@@ -1,119 +1,125 @@
-import { Controller, Get, Post, Body, Query, Logger } from '@nestjs/common';
-import { ApiTags, ApiOperation } from '@nestjs/swagger';
-import { MemoryFileService } from '../services/memory-file.service';
-import { MemorySearchService } from '../services/memory-search.service';
+import { Controller, Get, Post, Delete, Param, Query, Body, Logger, UseGuards } from '@nestjs/common';
+import { AuthGuard } from '@modules/auth/guard/auth.guard';
+import { ContextRepository } from '@modules/contexts/infrastructure/persistence/context.repository';
+import { ContextType } from '@modules/contexts/domain/entities/context.entity';
 
-@ApiTags('memory')
 @Controller('memory')
+@UseGuards(AuthGuard)
 export class MemoryController {
   private readonly logger = new Logger(MemoryController.name);
 
-  constructor(
-    private readonly memoryFileService: MemoryFileService,
-    private readonly memorySearchService: MemorySearchService,
-  ) {}
+  constructor(private readonly contextRepository: ContextRepository) {}
 
-  @Get('l1')
-  @ApiOperation({ summary: 'Obtiene toda la memoria L1 (MEMORY.md + USER.md) inyectada' })
-  async getL1Memory() {
-    const context = await this.memoryFileService.buildInjectedContext();
-    const memory = await this.memoryFileService.getMemory();
-    const user = await this.memoryFileService.getUser();
+  @Get(':projectId')
+  async listByProject(@Param('projectId') projectId: string) {
+    const entries = await this.contextRepository.findByProjectId(projectId, ContextType.MEMORY);
     return {
       success: true,
-      context,
-      memory: { entries: memory.entries.length },
-      user: { entries: user.entries.length },
+      data: {
+        entries: entries.map(e => ({
+          id: e.id,
+          key: e.extractedInfo?.key || e.summary,
+          content: e.extractedInfo?.content || '',
+          category: e.extractedInfo?.category || 'context',
+          tags: e.extractedInfo?.tags || [],
+          createdAt: e.createdAt,
+          updatedAt: e.updatedAt,
+        })),
+        total: entries.length,
+      },
     };
   }
 
-  @Post('l1/memory')
-  @ApiOperation({ summary: 'Agrega una entrada a MEMORY.md (conocimiento del proyecto)' })
-  async addMemoryEntry(
-    @Body()
-    body: {
-      key: string;
-      content: string;
-      category?: string;
-      tags?: string[];
-    },
+  @Post(':projectId')
+  async create(
+    @Param('projectId') projectId: string,
+    @Body() body: { key: string; content: string; category?: string; tags?: string[] },
   ) {
     if (!body.key || !body.content) {
       return { success: false, error: 'key and content are required' };
     }
-    const doc = await this.memoryFileService.addMemoryEntry({
-      key: body.key,
-      content: body.content,
-      category: body.category || 'context',
-      tags: body.tags || [],
-    });
-    return {
-      success: true,
-      entryCount: doc.entries.length,
-      key: body.key,
-    };
-  }
 
-  @Post('l1/user')
-  @ApiOperation({ summary: 'Agrega una entrada a USER.md (preferencias del usuario)' })
-  async addUserEntry(
-    @Body()
-    body: {
-      key: string;
-      content: string;
-      category?: string;
-      tags?: string[];
-    },
-  ) {
-    if (!body.key || !body.content) {
-      return { success: false, error: 'key and content are required' };
-    }
-    const doc = await this.memoryFileService.addUserEntry({
-      key: body.key,
-      content: body.content,
-      category: body.category || 'preference',
-      tags: body.tags || [],
-    });
-    return {
-      success: true,
-      entryCount: doc.entries.length,
-      key: body.key,
-    };
-  }
+    const existing = await this.contextRepository.findByProjectId(projectId, ContextType.MEMORY);
+    const duplicate = existing.find(e => e.extractedInfo?.key === body.key);
 
-  @Post('l1/remove')
-  @ApiOperation({ summary: 'Elimina una entrada de MEMORY.md o USER.md por key' })
-  async removeEntry(
-    @Body() body: { key: string; file: 'memory' | 'user' },
-  ) {
-    if (!body.key) return { success: false, error: 'key is required' };
-    if (body.file === 'user') {
-      await this.memoryFileService.removeUserEntry(body.key);
+    if (duplicate) {
+      await this.contextRepository.update(duplicate.id, {
+        extractedInfo: {
+          ...duplicate.extractedInfo,
+          content: body.content,
+          category: body.category || 'context',
+          tags: body.tags || [],
+          updatedAt: new Date().toISOString(),
+        },
+      });
     } else {
-      await this.memoryFileService.removeMemoryEntry(body.key);
+      await this.contextRepository.create({
+        projectId,
+        type: ContextType.MEMORY,
+        summary: body.key,
+        extractedInfo: {
+          type: 'memory',
+          key: body.key,
+          content: body.content,
+          category: body.category || 'context',
+          tags: body.tags || [],
+          savedAt: new Date().toISOString(),
+        },
+      });
     }
+
     return { success: true, key: body.key };
   }
 
-  @Get('l2/search')
-  @ApiOperation({ summary: 'Busca en el historial completo de conversaciones (L2)' })
-  async search(
-    @Query('q') query: string,
-    @Query('limit') limit?: number,
-    @Query('sessionId') sessionId?: string,
+  @Delete(':projectId/:entryId')
+  async remove(
+    @Param('projectId') projectId: string,
+    @Param('entryId') entryId: string,
   ) {
-    if (!query) return { success: false, error: 'query (q) is required' };
-    const results = await this.memorySearchService.search(query, {
-      limit: limit || 10,
-      sessionId,
-    });
-    return { success: true, count: results.length, results };
+    const entries = await this.contextRepository.findByProjectId(projectId, ContextType.MEMORY);
+    const target = entries.find(e => e.id === entryId);
+    if (!target) {
+      return { success: false, error: 'Entry not found' };
+    }
+    await this.contextRepository.deactivate(entryId);
+    return { success: true };
   }
 
-  @Get('inject')
-  @ApiOperation({ summary: 'Obtiene el contexto de memoria L1 para inyección en prompts' })
-  async getInjectionContext() {
-    const context = await this.memoryFileService.buildInjectedContext();
-    return { success: true, context, hasContent: context.length > 0 };
+  @Get(':projectId/search')
+  async search(
+    @Param('projectId') projectId: string,
+    @Query('q') query: string,
+    @Query('limit') limit?: number,
+  ) {
+    if (!query) return { success: false, error: 'query (q) is required' };
+
+    const entries = await this.contextRepository.findByProjectId(projectId, ContextType.MEMORY);
+    const term = query.toLowerCase();
+    const scored = entries.map(e => {
+      const text = `${e.summary || ''} ${e.extractedInfo?.content || ''} ${(e.extractedInfo?.tags || []).join(' ')}`.toLowerCase();
+      let score = 0;
+      if (text.includes(term)) score += 0.5;
+      for (const word of term.split(/\s+/)) {
+        if (word.length < 2) continue;
+        const matches = text.match(new RegExp(word.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi'));
+        if (matches) score += 0.1 * matches.length;
+      }
+      return { entry: e, score: Math.min(score, 1) };
+    })
+      .filter(s => s.score > 0)
+      .sort((a, b) => b.score - a.score)
+      .slice(0, limit || 10);
+
+    return {
+      success: true,
+      count: scored.length,
+      results: scored.map(({ entry, score }) => ({
+        id: entry.id,
+        key: entry.extractedInfo?.key || entry.summary,
+        content: entry.extractedInfo?.content || '',
+        score,
+        createdAt: entry.createdAt,
+      })),
+    };
   }
 }

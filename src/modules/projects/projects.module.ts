@@ -11,10 +11,11 @@ import { ProjectRelationship } from './domain/entities/project-relationship.enti
 import { ProjectRepository } from './infrastructure/persistence/project.repository';
 import { ProjectsService } from './application/services/projects.service';
 import { ProjectsController } from './presentation/controllers/projects.controller';
+import { AuthModule } from '@modules/auth/auth.module';
 
 @Global()
 @Module({
-  imports: [TypeOrmModule.forFeature([Project, ProjectRelationship])],
+  imports: [TypeOrmModule.forFeature([Project, ProjectRelationship]), AuthModule],
   controllers: [ProjectsController],
   providers: [ProjectRepository, ProjectsService],
   exports: [TypeOrmModule, ProjectRepository, ProjectsService],

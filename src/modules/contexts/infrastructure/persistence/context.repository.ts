@@ -11,9 +11,11 @@ import {
   Context,
   ContextType,
 } from '@modules/contexts/domain/entities/context.entity';
+import { RedisService } from '@infrastructure/database/redis/redis.service';
 
 export interface CreateContextDto {
   issueId?: string;
+  projectId?: string;
   type: ContextType;
   summary?: string;
   messages?: any[];
@@ -23,9 +25,12 @@ export interface CreateContextDto {
 
 @Injectable()
 export class ContextRepository {
+  private static MEMORY_CACHE_TTL = 300;
+
   constructor(
     @InjectRepository(Context)
     private readonly repository: Repository<Context>,
+    private readonly redisService: RedisService,
   ) {}
 
   getRepository(): Repository<Context> {
@@ -38,6 +43,7 @@ export class ContextRepository {
     const context = this.repository.create({
       contextId,
       issueId: data.issueId,
+      projectId: data.projectId,
       type: data.type,
       summary: data.summary,
       messages: data.messages || [],
@@ -46,7 +52,23 @@ export class ContextRepository {
       isActive: true,
     });
 
-    return await this.repository.save(context);
+    const saved = await this.repository.save(context);
+    if (data.projectId) await this.invalidateCache(data.projectId);
+    return saved;
+  }
+
+  async findByProjectId(projectId: string, type?: ContextType): Promise<Context[]> {
+    const cacheKey = `memory:${projectId}${type ? `:${type}` : ''}`;
+
+    const cached = await this.redisService.cacheGet<Context[]>(cacheKey);
+    if (cached) return cached;
+
+    const where: any = { projectId, isActive: true };
+    if (type) where.type = type;
+    const results = await this.repository.find({ where, order: { createdAt: 'DESC' } });
+
+    await this.redisService.cacheSet(cacheKey, results, ContextRepository.MEMORY_CACHE_TTL);
+    return results;
   }
 
   async findById(id: string): Promise<Context | null> {
@@ -105,7 +127,9 @@ export class ContextRepository {
   }
 
   async deactivate(id: string): Promise<void> {
+    const context = await this.findById(id);
     await this.repository.update(id, { isActive: false });
+    if (context?.projectId) await this.invalidateCache(context.projectId);
   }
 
   async deactivateAllForIssue(issueId: string): Promise<void> {
@@ -113,5 +137,9 @@ export class ContextRepository {
       { issueId, isActive: true },
       { isActive: false },
     );
+  }
+
+  private async invalidateCache(projectId: string): Promise<void> {
+    await this.redisService.cacheDelete(`memory:${projectId}`);
   }
 }

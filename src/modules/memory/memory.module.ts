@@ -1,16 +1,12 @@
 import { Module, Global } from '@nestjs/common';
-import { TypeOrmModule } from '@nestjs/typeorm';
-import { MemoryFileService } from './services/memory-file.service';
-import { MemorySearchService } from './services/memory-search.service';
 import { MemoryController } from './controllers/memory.controller';
-import { ChatMessage } from '@modules/sessions/domain/entities/chat-message.entity';
-import { Context } from '@modules/contexts/domain/entities/context.entity';
+import { ContextsModule } from '@modules/contexts/contexts.module';
+import { AuthModule } from '@modules/auth/auth.module';
 
 @Global()
 @Module({
-  imports: [TypeOrmModule.forFeature([ChatMessage, Context])],
+  imports: [ContextsModule, AuthModule],
   controllers: [MemoryController],
-  providers: [MemoryFileService, MemorySearchService],
-  exports: [MemoryFileService, MemorySearchService],
+  exports: [],
 })
 export class MemoryModule {}

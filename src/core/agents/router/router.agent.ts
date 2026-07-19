@@ -23,7 +23,8 @@ import {
 } from '@modules/agency-agents/application/queries';
 import { SuggestedNext } from '@modules/agency-agents/application/queries/get-suggested-next/get-suggested-next.handler';
 import { McpPlanService } from '@modules/plans/application/services/mcp-plan.service';
-import { MemoryFileService } from '@modules/memory/services/memory-file.service';
+import { ContextRepository } from '@modules/contexts/infrastructure/persistence/context.repository';
+import { ContextType } from '@modules/contexts/domain/entities/context.entity';
 import { IAgencyResourcesRepository } from '@agency-resources/domain/ports/agency-resources-repository.port';
 import { AGENCY_RESOURCES_REPOSITORY } from '@agency-resources/domain/tokens';
 
@@ -42,7 +43,7 @@ export class RouterAgent extends BaseAgent {
     private readonly agentRegistry: AgentRegistry,
     private readonly agentLogger: AgentLoggerService,
     private readonly mcpPlanService: McpPlanService,
-    private readonly memoryFileService: MemoryFileService,
+    private readonly contextRepository: ContextRepository,
     @Inject(AGENCY_RESOURCES_REPOSITORY)
     private readonly agencyResourcesRepo: IAgencyResourcesRepository,
   ) {
@@ -83,20 +84,33 @@ export class RouterAgent extends BaseAgent {
       request.options?.language,
     );
 
-    // STEP 3: Inject L1 Memory (MEMORY.md + USER.md) — auto-inyectado como Hermes
-    const memoryContext = await this.memoryFileService.buildInjectedContext();
-    if (memoryContext) {
-      this.agentLogger.info(
-        this.agentId,
-        `🧠 [ROUTER] L1 Memory injected: ${memoryContext.split('\n').length} lines`,
-      );
-    }
-
-    // Extract rawInput and agencyId early for skill matching
+    // Extract rawInput, sessionId, projectId and agencyId early
     const sessionId: string | undefined = request.options?.sessionId;
     const projectId: string | undefined = request.options?.projectId;
     const agencyId: string | undefined = request.options?.agencyId;
     const rawInput: string = request.options?.rawInput ?? request.input;
+
+    // STEP 3: Inject project memory from DB — auto-inyectado
+    let memoryContext = '';
+    if (projectId) {
+      try {
+        const entries = await this.contextRepository.findByProjectId(projectId, ContextType.MEMORY);
+        if (entries.length > 0) {
+          const sections: string[] = ['', '─── MEMORIA DEL PROYECTO ───', ''];
+          for (const entry of entries) {
+            const info = entry.extractedInfo || {};
+            sections.push(`### ${info.key || entry.summary || 'entry'}`);
+            sections.push(info.content || entry.summary || '');
+            sections.push('');
+          }
+          sections.push('─── Fin Memoria ───');
+          memoryContext = sections.join('\n');
+          this.agentLogger.info(this.agentId, `🧠 [ROUTER] L1 Memory injected: ${entries.length} entries`);
+        }
+      } catch (error) {
+        this.logger.warn(`Memory injection failed: ${error.message}`);
+      }
+    }
 
     // ── AGENCY SKILLS: Buscar skills de la agencia que matcheen con el input ──
     let matchedSkillPrompt = '';
