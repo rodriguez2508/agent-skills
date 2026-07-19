@@ -43,6 +43,7 @@ import {
   SessionInitResponse,
   RelatedProjectSummary,
 } from '@core/agents/mcp-json-response';
+import { IAgencyRepository } from '@modules/agencies/domain/ports/agency-repository.port';
 
 interface StartSessionBody {
   clientId?: string;
@@ -96,6 +97,7 @@ export class SessionsController {
     private readonly contextNodes: ContextNodeService,
     private readonly queryBus: QueryBus,
     private readonly mcpPlanService: McpPlanService,
+    private readonly agencyRepository: IAgencyRepository,
   ) {}
 
   @Post('start')
@@ -525,6 +527,13 @@ export class SessionsController {
       ipAddress: clientIp,
     });
 
+    // Resolve agency for this user (first membership)
+    let agencyId: string | null = null;
+    try {
+      const agencies = await this.agencyRepository.findAgenciesByMemberId(user.id);
+      agencyId = agencies[0]?.id || null;
+    } catch (_) {}
+
     // Detectar proyecto desde cwd
     const detection = await this.projectsService.detectFromPath(body.cwd);
     const projectName = detection?.name || path.basename(body.cwd);
@@ -582,6 +591,13 @@ export class SessionsController {
       project.name,
       3600,
     );
+    if (agencyId) {
+      await this.redisService.set(
+        `session:${session.sessionId}:agencyId`,
+        agencyId,
+        3600,
+      );
+    }
 
     // Cargar catálogo BM2, planes activos, sesiones recientes, proyectos relacionados e historial de contexto en paralelo
     const [
@@ -642,8 +658,19 @@ export class SessionsController {
       pendingWorkSummary = `Proyecto retomado. ${recentSessions.length} sesión(es) previas registradas. Sin planes activos pendientes.`;
     }
 
+    // Resolve agency details for response
+    let agencyInfo: { id: string; name: string; slug: string } | undefined;
+    if (agencyId) {
+      try {
+        const agency = await this.agencyRepository.findById(agencyId);
+        if (agency) {
+          agencyInfo = { id: agency.id, name: agency.name, slug: agency.slug };
+        }
+      } catch (_) {}
+    }
+
     this.logger.log(
-      `🚀 session_init_auto | project: ${project.name} | session: ${session.sessionId} | new: ${isNewProject} | plans: ${activePlans.length}`,
+      `🚀 session_init_auto | project: ${project.name} | session: ${session.sessionId} | new: ${isNewProject} | plans: ${activePlans.length} | agency: ${agencyInfo?.slug || 'none'}`,
     );
 
     return buildSessionInitResponse({
@@ -665,6 +692,7 @@ export class SessionsController {
       recentSessions,
       relatedProjects,
       pendingWorkSummary,
+      agency: agencyInfo,
       projectHistory: projectHistory
         ? {
             totalMessages: projectHistory.totalMessages,

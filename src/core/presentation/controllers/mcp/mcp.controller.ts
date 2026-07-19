@@ -1915,9 +1915,10 @@ export class McpController {
         },
       );
 
-      const [userId, projectName] = await Promise.all([
+      const [userId, projectName, agencyId] = await Promise.all([
         this.redisService.get<string>(`session:${sessionId}:userId`),
         this.redisService.get<string>(`session:${sessionId}:projectName`),
+        this.redisService.get<string>(`session:${sessionId}:agencyId`),
       ]);
 
       const response = await this.routerAgent.execute({
@@ -1926,6 +1927,7 @@ export class McpController {
           ...optionsWithIssue,
           sessionId,
           userId,
+          agencyId,
           projectId: projectIdForSession || undefined,
           projectName: projectName || undefined,
           projectPath,
@@ -1953,6 +1955,7 @@ export class McpController {
                 ...optionsWithIssue,
                 sessionId,
                 userId,
+                agencyId,
                 projectId: projectIdForSession || undefined,
                 projectName: projectName || undefined,
                 projectPath,

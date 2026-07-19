@@ -45,6 +45,7 @@ export class AgencyResourcesRepository implements IAgencyResourcesRepository {
       name: data.name,
       description: data.description,
       promptTemplate: data.promptTemplate,
+      agentType: data.agentType || 'general',
       tags: data.tags || [],
       inputVariables: data.inputVariables || [],
       isPublished: data.isPublished || false,

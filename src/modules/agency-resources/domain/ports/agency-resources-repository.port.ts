@@ -15,6 +15,7 @@ export interface CreateAgencySkillData {
   name: string;
   description?: string;
   promptTemplate: string;
+  agentType?: string;
   tags?: string[];
   inputVariables?: string[];
   isPublished?: boolean;

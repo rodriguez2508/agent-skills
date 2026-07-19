@@ -9,6 +9,7 @@ export class AgencySkillDto {
   name!: string;
   description!: string;
   promptTemplate!: string;
+  agentType!: string;
   tags!: string[];
   usageCount!: number;
   rating!: number;
@@ -25,6 +26,7 @@ export class AgencySkillDto {
     dto.name = entity.name;
     dto.description = entity.description;
     dto.promptTemplate = entity.promptTemplate;
+    dto.agentType = entity.agentType;
     dto.tags = entity.tags;
     dto.usageCount = entity.usageCount;
     dto.rating = Number(entity.rating);

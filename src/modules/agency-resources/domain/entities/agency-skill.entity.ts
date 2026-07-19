@@ -29,6 +29,9 @@ export class AgencySkill {
   @Column({ type: 'text', name: 'prompt_template' })
   promptTemplate!: string;
 
+  @Column({ type: 'varchar', length: 50, name: 'agent_type', default: 'general' })
+  agentType!: string;
+
   @Column({ type: 'simple-array', default: '' })
   tags!: string[];
 

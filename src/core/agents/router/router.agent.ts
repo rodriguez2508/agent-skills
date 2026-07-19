@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Inject, Injectable } from '@nestjs/common';
 import { CommandBus, QueryBus } from '@nestjs/cqrs';
 import { BaseAgent } from '@core/agents/base.agent';
 import {
@@ -24,6 +24,8 @@ import {
 import { SuggestedNext } from '@modules/agency-agents/application/queries/get-suggested-next/get-suggested-next.handler';
 import { McpPlanService } from '@modules/plans/application/services/mcp-plan.service';
 import { MemoryFileService } from '@modules/memory/services/memory-file.service';
+import { IAgencyResourcesRepository } from '@agency-resources/domain/ports/agency-resources-repository.port';
+import { AGENCY_RESOURCES_REPOSITORY } from '@agency-resources/domain/tokens';
 
 /**
  * RouterAgent - Orquestador principal de agentes
@@ -41,10 +43,12 @@ export class RouterAgent extends BaseAgent {
     private readonly agentLogger: AgentLoggerService,
     private readonly mcpPlanService: McpPlanService,
     private readonly memoryFileService: MemoryFileService,
+    @Inject(AGENCY_RESOURCES_REPOSITORY)
+    private readonly agencyResourcesRepo: IAgencyResourcesRepository,
   ) {
     super(
       'RouterAgent',
-      'Orquesta y enruta solicitudes a los agentes especializados, inyectando reglas y memoria L1 automáticamente',
+      'Orquesta y enruta solicitudes a los agentes especializados, inyectando reglas, memoria L1 y skills de agencia automáticamente',
     );
     this.rulesApiUrl = `http://localhost:${process.env.PORT || 8004}/rules/search`;
   }
@@ -88,8 +92,34 @@ export class RouterAgent extends BaseAgent {
       );
     }
 
-    // Prepend system instructions + L1 memory to the input
-    const finalInput = systemInstructions + memoryContext + request.input;
+    // Extract rawInput and agencyId early for skill matching
+    const sessionId: string | undefined = request.options?.sessionId;
+    const projectId: string | undefined = request.options?.projectId;
+    const agencyId: string | undefined = request.options?.agencyId;
+    const rawInput: string = request.options?.rawInput ?? request.input;
+
+    // ── AGENCY SKILLS: Buscar skills de la agencia que matcheen con el input ──
+    let matchedSkillPrompt = '';
+    if (agencyId) {
+      try {
+        const matched = await this.matchAgencySkills(agencyId, rawInput);
+        if (matched) {
+          matchedSkillPrompt = matched;
+          this.agentLogger.info(
+            this.agentId,
+            `🎯 [ROUTER] Agency skill matched — prompt injected (${matched.length} chars)`,
+          );
+        }
+      } catch (err) {
+        this.agentLogger.warn(
+          this.agentId,
+          `⚠️ Error matching agency skills: ${err.message}`,
+        );
+      }
+    }
+
+    // Prepend system instructions + L1 memory + agency skill prompt to the input
+    const finalInput = systemInstructions + memoryContext + matchedSkillPrompt + request.input;
 
     if (allRules.length > 0) {
       this.agentLogger.info(
@@ -109,10 +139,6 @@ export class RouterAgent extends BaseAgent {
       relevantRules: allRules,
       rulesContext: this.formatRulesContext(allRules),
     };
-
-    const sessionId: string | undefined = request.options?.sessionId;
-    const projectId: string | undefined = request.options?.projectId;
-    const rawInput: string = request.options?.rawInput ?? request.input;
 
     // Detectar intención — usar rawInput (sin reglas prepended)
     const intention = this.detectIntention(rawInput);
@@ -950,6 +976,65 @@ export class RouterAgent extends BaseAgent {
   private findSpecializedAgent(intention: string) {
     const agentId = this.findSpecializedAgentId(intention);
     return agentId ? this.agentRegistry.getAgent(agentId) : undefined;
+  }
+
+  /**
+   * Busca skills de la agencia que coincidan con el input del usuario.
+   * Matching por: nombre, tags, descripción (case-insensitive, substring).
+   * Retorna el promptTemplate de la skill más relevante, o '' si no hay match.
+   */
+  private async matchAgencySkills(agencyId: string, input: string): Promise<string> {
+    const skills = await this.agencyResourcesRepo.findSkillsByAgencyId(agencyId);
+    if (!skills || skills.length === 0) return '';
+
+    const lowerInput = input.toLowerCase();
+    const words = lowerInput.split(/\s+/).filter(w => w.length > 3);
+
+    let bestSkill: { name: string; score: number; promptTemplate: string } | null = null;
+
+    for (const skill of skills) {
+      let score = 0;
+      const skillName = skill.name.toLowerCase();
+      const skillDesc = (skill.description || '').toLowerCase();
+      const skillTags = (skill.tags || []).map(t => t.toLowerCase());
+
+      // Exact name match → high score
+      if (lowerInput.includes(skillName) || skillName.includes(lowerInput)) {
+        score += 10;
+      }
+
+      // Tag match
+      for (const tag of skillTags) {
+        if (lowerInput.includes(tag)) score += 5;
+        for (const word of words) {
+          if (tag.includes(word) || word.includes(tag)) score += 2;
+        }
+      }
+
+      // Description keyword overlap
+      for (const word of words) {
+        if (skillDesc.includes(word)) score += 1;
+      }
+
+      // Name word overlap
+      for (const word of words) {
+        if (skillName.includes(word)) score += 3;
+      }
+
+      if (score > 0 && (!bestSkill || score > bestSkill.score)) {
+        bestSkill = { name: skill.name, score, promptTemplate: skill.promptTemplate };
+      }
+    }
+
+    if (bestSkill && bestSkill.score >= 3) {
+      this.agentLogger.info(
+        this.agentId,
+        `🎯 [ROUTER] Skill "${bestSkill.name}" matched (score: ${bestSkill.score})`,
+      );
+      return `\n\n--- AGENCY SKILL: ${bestSkill.name} ---\n${bestSkill.promptTemplate}\n--- END AGENCY SKILL ---\n\n`;
+    }
+
+    return '';
   }
 
   private getAgentMap(): Record<string, string> {

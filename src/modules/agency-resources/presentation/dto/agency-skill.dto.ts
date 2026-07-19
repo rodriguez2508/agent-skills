@@ -24,6 +24,11 @@ export class CreateAgencySkillDto {
   promptTemplate!: string;
 
   @IsOptional()
+  @IsString()
+  @MaxLength(50)
+  agentType?: string;
+
+  @IsOptional()
   @IsArray()
   @IsString({ each: true })
   tags?: string[];
@@ -51,6 +56,11 @@ export class UpdateAgencySkillDto {
   @IsOptional()
   @IsString()
   promptTemplate?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(50)
+  agentType?: string;
 
   @IsOptional()
   @IsArray()

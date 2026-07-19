@@ -53,6 +53,11 @@ export interface SessionInitResponse extends BaseResponse {
   recentSessions: RecentSessionSummary[];
   relatedProjects: RelatedProjectSummary[];
   pendingWorkSummary?: string;
+  agency?: {
+    id: string;
+    name: string;
+    slug: string;
+  };
   projectHistory?: {
     totalMessages: number;
     issuesWorked: string[];
@@ -121,6 +126,7 @@ export function buildSessionInitResponse(params: {
   recentSessions?: RecentSessionSummary[];
   relatedProjects?: RelatedProjectSummary[];
   pendingWorkSummary?: string;
+  agency?: { id: string; name: string; slug: string };
   projectHistory?: SessionInitResponse['projectHistory'];
 }): SessionInitResponse {
   return {
