@@ -17,7 +17,7 @@ export class AgencyWorkflow {
   @PrimaryGeneratedColumn('uuid')
   id!: string;
 
-  @Column({ type: 'uuid' })
+  @Column({ type: 'uuid', name: 'agency_id' })
   agencyId!: string;
 
   @Column({ type: 'varchar', length: 100 })
@@ -29,19 +29,19 @@ export class AgencyWorkflow {
   @Column({ type: 'jsonb' })
   steps!: any;
 
-  @Column({ type: 'text', default: 'sequential' })
+  @Column({ type: 'varchar', length: 30, name: 'trigger_type', default: 'sequential' })
   triggerType!: string;
 
-  @Column({ type: 'jsonb', default: {} })
+  @Column({ type: 'jsonb', name: 'trigger_config', default: '{}' })
   triggerConfig!: any;
 
-  @Column({ type: 'int', default: 0 })
+  @Column({ type: 'int', name: 'execution_count', default: 0 })
   executionCount!: number;
 
-  @Column({ type: 'int', default: 0 })
+  @Column({ type: 'int', name: 'success_count', default: 0 })
   successCount!: number;
 
-  @Column({ type: 'boolean', default: true })
+  @Column({ type: 'boolean', name: 'is_active', default: true })
   isActive!: boolean;
 
   @ManyToOne(() => Agency, { onDelete: 'CASCADE' })

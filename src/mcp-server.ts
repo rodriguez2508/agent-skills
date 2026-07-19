@@ -895,6 +895,70 @@ const TOOLS = [
       required: ['query'],
     },
   },
+  {
+    name: 'list_agency_skills',
+    description:
+      'Lista todas las skills publicadas de la agencia del usuario. Devuelve nombre, descripción, tags y uso de cada skill disponible.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        sessionId: {
+          type: 'string',
+          description: 'ID de sesión MCP para obtener la agencia (opcional)',
+        },
+      },
+    },
+  },
+  {
+    name: 'get_skill_detail',
+    description:
+      'Obtiene el detalle completo de una skill de la agencia, incluyendo su promptTemplate y variables de entrada.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        skillId: {
+          type: 'string',
+          description: 'ID de la skill',
+        },
+        skillName: {
+          type: 'string',
+          description: 'Nombre de la skill (alternativa a skillId)',
+        },
+        sessionId: {
+          type: 'string',
+          description: 'ID de sesión MCP (opcional)',
+        },
+      },
+    },
+  },
+  {
+    name: 'invoke_skill',
+    description:
+      'Invoca una skill de la agencia: renderiza su promptTemplate sustituyendo las variables de entrada. Devuelve el prompt listo para usar como contexto de un agente.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        skillName: {
+          type: 'string',
+          description: 'Nombre de la skill a invocar',
+        },
+        skillId: {
+          type: 'string',
+          description: 'ID de la skill (alternativa a skillName)',
+        },
+        inputVariables: {
+          type: 'object',
+          description: 'Mapa de variables {clave: valor} para sustituir en el promptTemplate',
+          additionalProperties: { type: 'string' },
+        },
+        sessionId: {
+          type: 'string',
+          description: 'ID de sesión MCP (opcional)',
+        },
+      },
+      required: [],
+    },
+  },
 ];
 
 // List Tools Handler
@@ -1276,7 +1340,21 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         }
 
         const data = await response.json();
-        // Devolver JSON estructurado para que el CLI pueda parsear
+
+        // Enriquecer con conteo de skills si hay agencyId
+        if (data?.agency?.id) {
+          try {
+            const skillsResp = await fetch(`${API_URL}/v1/agency/${data.agency.id}/skills`);
+            if (skillsResp.ok) {
+              const skills = await skillsResp.json();
+              if (skills.length > 0) {
+                data.pendingWorkSummary = data.pendingWorkSummary || '';
+                data.pendingWorkSummary += ` | ${skills.length} skills disponibles (usa list_agency_skills para verlas)`;
+              }
+            }
+          } catch (_) {}
+        }
+
         result = JSON.stringify(data, null, 2);
         break;
       }
@@ -1412,6 +1490,157 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           text += `   Creado: ${new Date(p.createdAt).toLocaleString()}\n\n`;
         });
         result = text.trim();
+        break;
+      }
+
+      case 'list_agency_skills': {
+        const sessionId = args?.sessionId as string | undefined;
+        const agencyId = sessionId
+          ? await fetch(`${API_URL}/mcp/debug`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ sessionId }),
+            })
+              .then(r => r.json())
+              .then(d => d.agencyId || null)
+              .catch(() => null)
+          : null;
+
+        if (!agencyId) {
+          result = '⚠️ No se detectó agencia activa. Asegúrate de estar conectado con IP de una agencia registrada.';
+          break;
+        }
+
+        const resp = await fetch(`${API_URL}/v1/agency/${agencyId}/skills`);
+        if (!resp.ok) {
+          result = `⚠️ Error al listar skills: ${resp.status}`;
+          break;
+        }
+        const skills = await resp.json();
+        if (skills.length === 0) {
+          result = '📭 No hay skills publicadas en esta agencia. Crea una desde la web UI en /v1/agency/skills.';
+        } else {
+          let text = `🎨 **Skills de la agencia** (${skills.length}):\n\n`;
+          skills.forEach((s: any, i: number) => {
+            const tags = s.tags?.length ? ` [${s.tags.join(', ')}]` : '';
+            const usage = s.usageCount > 0 ? ` · ${s.usageCount} usos` : '';
+            text += `${i + 1}. **${s.name}**${tags}${usage}\n`;
+            if (s.description) text += `   ${s.description.substring(0, 80)}\n`;
+            text += `   ID: \`${s.id}\`\n\n`;
+          });
+          text += '💡 Usa `invoke_skill` con el nombre o ID para renderizar su prompt.';
+          result = text;
+        }
+        break;
+      }
+
+      case 'get_skill_detail': {
+        const sessionId = args?.sessionId as string | undefined;
+        const skillId = args?.skillId as string | undefined;
+        const skillName = args?.skillName as string | undefined;
+
+        if (!skillId && !skillName) {
+          result = '⚠️ Proporciona skillId o skillName.';
+          break;
+        }
+
+        const agencyId = sessionId
+          ? await fetch(`${API_URL}/mcp/debug`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ sessionId }),
+            })
+              .then(r => r.json())
+              .then(d => d.agencyId || null)
+              .catch(() => null)
+          : null;
+
+        if (!agencyId) {
+          result = '⚠️ No se detectó agencia activa.';
+          break;
+        }
+
+        let skill;
+        if (skillId) {
+          const resp = await fetch(`${API_URL}/v1/agency/${agencyId}/skills/${skillId}`);
+          if (!resp.ok) { result = `⚠️ Skill no encontrada: ${resp.status}`; break; }
+          skill = await resp.json();
+        } else {
+          const resp = await fetch(`${API_URL}/v1/agency/${agencyId}/skills`);
+          if (!resp.ok) { result = `⚠️ Error: ${resp.status}`; break; }
+          const all = await resp.json();
+          skill = all.find((s: any) => s.name === skillName);
+          if (!skill) { result = `⚠️ Skill "${skillName}" no encontrada.`; break; }
+        }
+
+        let text = `🎨 **${skill.name}**\n\n`;
+        if (skill.description) text += `📝 ${skill.description}\n\n`;
+        text += `📋 **Prompt Template:**\n\`\`\`\n${skill.promptTemplate}\n\`\`\`\n\n`;
+        if (skill.inputVariables?.length) text += `🔤 **Variables:** ${skill.inputVariables.join(', ')}\n`;
+        if (skill.tags?.length) text += `🏷️ **Tags:** ${skill.tags.join(', ')}\n`;
+        text += `📊 **Usos:** ${skill.usageCount} · **Rating:** ${skill.rating}\n`;
+        text += `ID: \`${skill.id}\``;
+        result = text;
+        break;
+      }
+
+      case 'invoke_skill': {
+        const sessionId = args?.sessionId as string | undefined;
+        const skillId = args?.skillId as string | undefined;
+        const skillName = args?.skillName as string | undefined;
+        const inputVariables = (args?.inputVariables as Record<string, string>) || {};
+
+        const agencyId = sessionId
+          ? await fetch(`${API_URL}/mcp/debug`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ sessionId }),
+            })
+              .then(r => r.json())
+              .then(d => d.agencyId || null)
+              .catch(() => null)
+          : null;
+
+        if (!agencyId) {
+          result = '⚠️ No se detectó agencia activa.';
+          break;
+        }
+
+        let skill;
+        if (skillId) {
+          const resp = await fetch(`${API_URL}/v1/agency/${agencyId}/skills/${skillId}`);
+          if (!resp.ok) { result = `⚠️ Skill no encontrada: ${resp.status}`; break; }
+          skill = await resp.json();
+        } else if (skillName) {
+          const resp = await fetch(`${API_URL}/v1/agency/${agencyId}/skills`);
+          if (!resp.ok) { result = `⚠️ Error: ${resp.status}`; break; }
+          const all = await resp.json();
+          skill = all.find((s: any) => s.name === skillName);
+          if (!skill) { result = `⚠️ Skill "${skillName}" no encontrada.`; break; }
+        } else {
+          result = '⚠️ Proporciona skillId o skillName.';
+          break;
+        }
+
+        // Renderizar promptTemplate con variables
+        let rendered = skill.promptTemplate;
+        for (const [key, value] of Object.entries(inputVariables)) {
+          rendered = rendered.replace(new RegExp(`\\{\\{${key}\\}\\}`, 'g'), value);
+        }
+
+        // Incrementar uso
+        await fetch(`${API_URL}/v1/agency/${agencyId}/skills/${skill.id}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ usageCount: (skill.usageCount || 0) + 1 }),
+        }).catch(() => {});
+
+        let text = `🎨 **Skill invocada:** ${skill.name}\n\n`;
+        if (Object.keys(inputVariables).length > 0) {
+          text += `📝 **Variables sustituidas:** ${Object.keys(inputVariables).join(', ')}\n\n`;
+        }
+        text += `📋 **Prompt renderizado:**\n\`\`\`\n${rendered}\n\`\`\``;
+        result = text;
         break;
       }
 

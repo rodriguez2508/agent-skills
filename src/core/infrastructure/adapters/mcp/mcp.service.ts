@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, Inject } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { SSEServerTransport } from '@modelcontextprotocol/sdk/server/sse.js';
@@ -27,6 +27,8 @@ import {
   GetBackupsQuery,
 } from '@modules/agency-agents/application/queries';
 import { AgentConfigRegistryService } from '@infrastructure/adapters/agent-config/agent-config-registry.service';
+import { IAgencyResourcesRepository } from '@agency-resources/domain/ports/agency-resources-repository.port';
+import { AGENCY_RESOURCES_REPOSITORY } from '@agency-resources/domain/tokens';
 import * as fs from 'fs/promises';
 import * as path from 'path';
 import { promisify } from 'util';
@@ -62,6 +64,8 @@ export class McpService {
     private readonly commandBus: CommandBus,
     private readonly queryBus: QueryBus,
     private readonly agentConfigRegistry: AgentConfigRegistryService,
+    @Inject(AGENCY_RESOURCES_REPOSITORY)
+    private readonly agencyResourcesRepository: IAgencyResourcesRepository,
   ) {
     this.apiPort = this.configService.get<number>('PORT', 8004);
   }
@@ -1964,6 +1968,17 @@ When in doubt, ALWAYS use the agent_query tool first.`,
 
           const data = await response.json();
 
+          // Enriquecer con conteo de skills si hay agencyId
+          if (data?.agency?.id) {
+            try {
+              const skills = await this.agencyResourcesRepository.findSkillsByAgencyId(data.agency.id);
+              if (skills.length > 0) {
+                data.pendingWorkSummary = data.pendingWorkSummary || '';
+                data.pendingWorkSummary += ` | ${skills.length} skills disponibles (usa list_agency_skills para verlas)`;
+              }
+            } catch (_) {}
+          }
+
           // Persist sessionId for pre-write hook
           if (data.sessionId) {
             const fs = await import('fs/promises');
@@ -1990,6 +2005,155 @@ When in doubt, ALWAYS use the agent_query tool first.`,
             ],
             isError: true,
           };
+        }
+      },
+    );
+
+    // list_agency_skills — listar skills de la agencia
+    server.tool(
+      'list_agency_skills',
+      'Lista todas las skills publicadas de la agencia del usuario. Devuelve nombre, descripción, tags y uso.',
+      {
+        sessionId: z.string().optional().describe('Session ID para obtener la agencia'),
+      },
+      async ({ sessionId }, extra) => {
+        const sid = sessionId || extra?.sessionId || 'unknown';
+        try {
+          const agencyId = await this.redisService.get<string>(
+            `session:${sid}:agencyId`,
+          );
+
+          if (!agencyId) {
+            return {
+              content: [{ type: 'text' as const, text: '⚠️ No se detectó agencia activa. Conéctate con IP de una agencia registrada.' }],
+            };
+          }
+
+          const skills = await this.agencyResourcesRepository.findSkillsByAgencyId(agencyId);
+
+          if (skills.length === 0) {
+            return {
+              content: [{ type: 'text' as const, text: '📭 No hay skills publicadas en esta agencia. Crea una desde la web UI en /v1/agency/skills.' }],
+            };
+          }
+
+          let text = `🎨 **Skills de la agencia** (${skills.length}):\n\n`;
+          skills.forEach((s, i) => {
+            const tags = s.tags?.length ? ` [${s.tags.join(', ')}]` : '';
+            const usage = s.usageCount > 0 ? ` · ${s.usageCount} usos` : '';
+            text += `${i + 1}. **${s.name}**${tags}${usage}\n`;
+            if (s.description) text += `   ${s.description.substring(0, 80)}\n`;
+            text += `   ID: \`${s.id}\`\n\n`;
+          });
+          text += '💡 Usa `invoke_skill` con el nombre o ID para renderizar su prompt.';
+
+          return { content: [{ type: 'text' as const, text }] };
+        } catch (error) {
+          const msg = error instanceof Error ? error.message : 'Error';
+          return { content: [{ type: 'text' as const, text: `❌ Error al listar skills: ${msg}` }], isError: true };
+        }
+      },
+    );
+
+    // get_skill_detail — detalle completo de una skill
+    server.tool(
+      'get_skill_detail',
+      'Obtiene el detalle completo de una skill de la agencia, incluyendo promptTemplate y variables de entrada.',
+      {
+        skillId: z.string().optional().describe('ID de la skill'),
+        skillName: z.string().optional().describe('Nombre de la skill (alternativa a skillId)'),
+        sessionId: z.string().optional().describe('Session ID'),
+      },
+      async ({ skillId, skillName, sessionId }, extra) => {
+        const sid = sessionId || extra?.sessionId || 'unknown';
+        try {
+          const agencyId = await this.redisService.get<string>(
+            `session:${sid}:agencyId`,
+          );
+          if (!agencyId) {
+            return { content: [{ type: 'text' as const, text: '⚠️ No se detectó agencia activa.' }] };
+          }
+
+          let skill;
+          if (skillId) {
+            skill = await this.agencyResourcesRepository.findSkillById(skillId);
+            if (!skill) return { content: [{ type: 'text' as const, text: `⚠️ Skill no encontrada: ${skillId}` }] };
+          } else if (skillName) {
+            const all = await this.agencyResourcesRepository.findSkillsByAgencyId(agencyId);
+            skill = all.find(s => s.name === skillName);
+            if (!skill) return { content: [{ type: 'text' as const, text: `⚠️ Skill "${skillName}" no encontrada.` }] };
+          } else {
+            return { content: [{ type: 'text' as const, text: '⚠️ Proporciona skillId o skillName.' }] };
+          }
+
+          let text = `🎨 **${skill.name}**\n\n`;
+          if (skill.description) text += `📝 ${skill.description}\n\n`;
+          text += `📋 **Prompt Template:**\n\`\`\`\n${skill.promptTemplate}\n\`\`\`\n\n`;
+          if (skill.inputVariables?.length) text += `🔤 **Variables:** ${skill.inputVariables.join(', ')}\n`;
+          if (skill.tags?.length) text += `🏷️ **Tags:** ${skill.tags.join(', ')}\n`;
+          text += `📊 **Usos:** ${skill.usageCount} · **Rating:** ${skill.rating}\n`;
+          text += `ID: \`${skill.id}\``;
+
+          return { content: [{ type: 'text' as const, text }] };
+        } catch (error) {
+          const msg = error instanceof Error ? error.message : 'Error';
+          return { content: [{ type: 'text' as const, text: `❌ Error: ${msg}` }], isError: true };
+        }
+      },
+    );
+
+    // invoke_skill — renderizar prompt de una skill con variables
+    server.tool(
+      'invoke_skill',
+      'Invoca una skill: renderiza su promptTemplate sustituyendo variables. Devuelve el prompt listo para usar como contexto.',
+      {
+        skillName: z.string().optional().describe('Nombre de la skill a invocar'),
+        skillId: z.string().optional().describe('ID de la skill (alternativa a skillName)'),
+        inputVariables: z.record(z.string(), z.string()).optional().describe('Variables {clave: valor} para sustituir en el promptTemplate'),
+        sessionId: z.string().optional().describe('Session ID'),
+      },
+      async ({ skillName, skillId, inputVariables, sessionId }, extra) => {
+        const sid = sessionId || extra?.sessionId || 'unknown';
+        const vars = inputVariables || {};
+        try {
+          const agencyId = await this.redisService.get<string>(
+            `session:${sid}:agencyId`,
+          );
+          if (!agencyId) {
+            return { content: [{ type: 'text' as const, text: '⚠️ No se detectó agencia activa.' }] };
+          }
+
+          let skill;
+          if (skillId) {
+            skill = await this.agencyResourcesRepository.findSkillById(skillId);
+            if (!skill) return { content: [{ type: 'text' as const, text: `⚠️ Skill no encontrada: ${skillId}` }] };
+          } else if (skillName) {
+            const all = await this.agencyResourcesRepository.findSkillsByAgencyId(agencyId);
+            skill = all.find(s => s.name === skillName);
+            if (!skill) return { content: [{ type: 'text' as const, text: `⚠️ Skill "${skillName}" no encontrada.` }] };
+          } else {
+            return { content: [{ type: 'text' as const, text: '⚠️ Proporciona skillId o skillName.' }] };
+          }
+
+          // Renderizar promptTemplate con variables
+          let rendered = skill.promptTemplate;
+          for (const [key, value] of Object.entries(vars)) {
+            rendered = rendered.replace(new RegExp(`\\{\\{${key}\\}\\}`, 'g'), value);
+          }
+
+          // Incrementar uso
+          await this.agencyResourcesRepository.incrementSkillUsage(skill.id);
+
+          let text = `🎨 **Skill invocada:** ${skill.name}\n\n`;
+          if (Object.keys(vars).length > 0) {
+            text += `📝 **Variables sustituidas:** ${Object.keys(vars).join(', ')}\n\n`;
+          }
+          text += `📋 **Prompt renderizado:**\n\`\`\`\n${rendered}\n\`\`\``;
+
+          return { content: [{ type: 'text' as const, text }] };
+        } catch (error) {
+          const msg = error instanceof Error ? error.message : 'Error';
+          return { content: [{ type: 'text' as const, text: `❌ Error: ${msg}` }], isError: true };
         }
       },
     );

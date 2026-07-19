@@ -17,7 +17,7 @@ export class AgencyAgent {
   @PrimaryGeneratedColumn('uuid')
   id!: string;
 
-  @Column({ type: 'uuid' })
+  @Column({ type: 'uuid', name: 'agency_id' })
   agencyId!: string;
 
   @Column({ type: 'varchar', length: 100 })
@@ -26,7 +26,7 @@ export class AgencyAgent {
   @Column({ type: 'text', default: '' })
   description!: string;
 
-  @Column({ type: 'text' })
+  @Column({ type: 'text', name: 'system_prompt' })
   systemPrompt!: string;
 
   @Column({ type: 'simple-array', default: '' })
@@ -39,13 +39,13 @@ export class AgencyAgent {
   })
   type!: string;
 
-  @Column({ type: 'simple-array', default: '' })
+  @Column({ type: 'simple-array', name: 'skill_ids', default: '' })
   skillIds!: string[];
 
-  @Column({ type: 'simple-array', default: '' })
+  @Column({ type: 'simple-array', name: 'rule_ids', default: '' })
   ruleIds!: string[];
 
-  @Column({ type: 'boolean', default: true })
+  @Column({ type: 'boolean', name: 'is_active', default: true })
   isActive!: boolean;
 
   @ManyToOne(() => Agency, { onDelete: 'CASCADE' })

@@ -17,7 +17,7 @@ export class AgencySkill {
   @PrimaryGeneratedColumn('uuid')
   id!: string;
 
-  @Column({ type: 'uuid' })
+  @Column({ type: 'uuid', name: 'agency_id' })
   agencyId!: string;
 
   @Column({ type: 'varchar', length: 100 })
@@ -26,25 +26,25 @@ export class AgencySkill {
   @Column({ type: 'text', default: '' })
   description!: string;
 
-  @Column({ type: 'text' })
+  @Column({ type: 'text', name: 'prompt_template' })
   promptTemplate!: string;
 
   @Column({ type: 'simple-array', default: '' })
   tags!: string[];
 
-  @Column({ type: 'int', default: 0 })
+  @Column({ type: 'int', name: 'usage_count', default: 0 })
   usageCount!: number;
 
   @Column({ type: 'decimal', precision: 3, scale: 2, default: 0 })
   rating!: number;
 
-  @Column({ type: 'simple-array', default: '' })
+  @Column({ type: 'simple-array', name: 'input_variables', default: '' })
   inputVariables!: string[];
 
-  @Column({ type: 'boolean', default: false })
+  @Column({ type: 'boolean', name: 'is_published', default: false })
   isPublished!: boolean;
 
-  @Column({ type: 'boolean', default: true })
+  @Column({ type: 'boolean', name: 'is_active', default: true })
   isActive!: boolean;
 
   @ManyToOne(() => Agency, { onDelete: 'CASCADE' })

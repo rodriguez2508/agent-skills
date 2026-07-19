@@ -18,7 +18,7 @@ export class AgencyRule {
   @PrimaryGeneratedColumn('uuid')
   id!: string;
 
-  @Column({ type: 'uuid' })
+  @Column({ type: 'uuid', name: 'agency_id' })
   agencyId!: string;
 
   @Column({ type: 'varchar', length: 100 })
@@ -34,11 +34,12 @@ export class AgencyRule {
   })
   category!: string;
 
-  @Column({ type: 'text' })
+  @Column({ type: 'text', name: 'rule_content' })
   ruleContent!: string;
 
   @Column({
     type: 'enum',
+    name: 'enforcement_level',
     enum: ['soft', 'hard'],
     default: 'soft',
   })
@@ -47,7 +48,7 @@ export class AgencyRule {
   @Column({ type: 'int', default: 0 })
   priority!: number;
 
-  @Column({ type: 'boolean', default: true })
+  @Column({ type: 'boolean', name: 'is_active', default: true })
   isActive!: boolean;
 
   @ManyToOne(() => Agency, { onDelete: 'CASCADE' })
