@@ -56,6 +56,10 @@ export class McpPlan {
   @Index()
   sessionId?: string;
 
+  @Column({ type: 'uuid', name: 'context_id', nullable: true })
+  @Index()
+  contextId?: string;
+
   @Column({ type: 'varchar', length: 100, name: 'agent_id', nullable: true })
   agentId?: string;
 

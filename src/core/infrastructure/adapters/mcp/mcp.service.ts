@@ -17,6 +17,7 @@ import { ContextType } from '@modules/contexts/domain/entities/context.entity';
 import { Context7Adapter } from '@infrastructure/adapters/context7/context7.adapter';
 import { SkillFileService } from '@core/skills/services/skill-file.service';
 import { ContextRepository } from '@modules/contexts/infrastructure/persistence/context.repository';
+import { ChatMessagesService } from '@modules/sessions/application/services/chat-messages.service';
 import { CommandBus, QueryBus } from '@nestjs/cqrs';
 import {
   CreateBackupCommand,
@@ -59,6 +60,7 @@ export class McpService {
     private readonly context7Adapter: Context7Adapter,
     private readonly skillFileService: SkillFileService,
     private readonly contextRepository: ContextRepository,
+    private readonly chatMessagesService: ChatMessagesService,
     private readonly commandBus: CommandBus,
     private readonly queryBus: QueryBus,
     private readonly agentConfigRegistry: AgentConfigRegistryService,
@@ -522,9 +524,8 @@ Issue tracking is enabled for this session.`,
   }
 
   /**
-   * Saves a chat message to PostgreSQL
-   * Creates session if it doesn't exist
-   * Automatically creates/links an issue on first message
+   * Saves a chat message to Redis (temporary, TTL 24h).
+   * Messages are consumed when a plan is created (migrated to context as memory).
    */
   async saveChatMessage(
     sessionId: string,
@@ -533,41 +534,17 @@ Issue tracking is enabled for this session.`,
     metadata?: any,
   ): Promise<void> {
     try {
-      // Get user info from Redis
-      const userId = await this.redisService.get<string>(
-        `session:${sessionId}:userId`,
-      );
-      const clientId = await this.redisService.get<string>(
-        `session:${sessionId}:clientId`,
-      );
-      const ipAddress = await this.redisService.get<string>(
-        `session:${sessionId}:ip`,
-      );
-
-      // Create session if it doesn't exist (first message)
-      if (userId) {
-        await this.getOrCreateSessionForToolUse(
-          sessionId,
-          userId,
-          'conversation',
-          clientId || undefined,
-          ipAddress || undefined,
-        );
-      }
-
-      await this.sessionRepository.addMessage({
+      await this.chatMessagesService.addMessage(
         sessionId,
         role,
         content,
-        issueId: metadata?.issueId || null,
         metadata,
-        tokenCount: content.length,
-      });
+      );
       this.logger.debug(
-        `💬 Message saved to PostgreSQL: ${sessionId} - ${role}`,
+        `💬 Message saved to Redis: ${sessionId} - ${role}`,
       );
     } catch (error) {
-      this.logger.error(`Error saving message to DB: ${error.message}`);
+      this.logger.error(`Error saving message to Redis: ${error.message}`);
     }
   }
 

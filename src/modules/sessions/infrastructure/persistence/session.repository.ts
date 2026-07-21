@@ -344,7 +344,11 @@ export class SessionRepository implements ISessionRepository {
       this.repository.count({ where: { status: SessionStatus.EXPIRED } }),
     ]);
 
-    const totalMessages = await this.messageRepository.count();
+    const totalMessages = await this.repository
+      .createQueryBuilder('Session')
+      .select('SUM("Session"."message_count")', 'sum')
+      .getRawOne()
+      .then((r) => parseInt(r?.sum || '0', 10));
 
     return {
       totalSessions,

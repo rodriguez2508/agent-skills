@@ -15,6 +15,7 @@ import { Cron, CronExpression } from '@nestjs/schedule';
 import { SessionRepository } from '@modules/sessions/infrastructure/persistence/session.repository';
 import { SessionStatus } from '@modules/sessions/domain/entities/session.entity';
 import { LessThanOrEqual, IsNull } from 'typeorm';
+import { ChatMessagesService } from '@modules/sessions/application/services/chat-messages.service';
 
 @Injectable()
 export class SessionCleanupService {
@@ -24,7 +25,10 @@ export class SessionCleanupService {
   private readonly UNVALIDATED_SESSION_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes
   private readonly INACTIVE_SESSION_TIMEOUT_MS = 24 * 60 * 60 * 1000; // 24 hours
 
-  constructor(private readonly sessionRepository: SessionRepository) {
+  constructor(
+    private readonly sessionRepository: SessionRepository,
+    private readonly chatMessagesService: ChatMessagesService,
+  ) {
     this.logger.log('🗑️ SessionCleanupService initialized');
   }
 
@@ -176,5 +180,22 @@ export class SessionCleanupService {
     if (hours < 24) return `${hours}h`;
     const days = Math.floor(hours / 24);
     return `${days}d`;
+  }
+
+  /**
+   * Clean up residual Redis chat messages at 12 AM daily.
+   * Messages with no TTL or expired are deleted.
+   */
+  @Cron('0 0 * * *')
+  async cleanupRedisMessages(): Promise<void> {
+    this.logger.log('🧹 Starting Redis chat messages cleanup...');
+    try {
+      const result = await this.chatMessagesService.cleanup();
+      this.logger.log(
+        `🧹 Redis cleanup done: ${result.cleaned} cleaned, ${result.errors} errors`,
+      );
+    } catch (error) {
+      this.logger.error(`Redis cleanup failed: ${error.message}`);
+    }
   }
 }

@@ -11,11 +11,13 @@ import { Session } from './domain/entities/session.entity';
 import { ChatMessage } from './domain/entities/chat-message.entity';
 import { SessionRepository } from './infrastructure/persistence/session.repository';
 import { SessionCleanupService } from './infrastructure/services/session-cleanup.service';
+import { ChatMessagesService } from './application/services/chat-messages.service';
+import { DatabaseModule } from '@infrastructure/database/database.module';
 
 @Global()
 @Module({
-  imports: [TypeOrmModule.forFeature([Session, ChatMessage])],
-  providers: [SessionRepository, SessionCleanupService],
-  exports: [SessionRepository, SessionCleanupService, TypeOrmModule],
+  imports: [TypeOrmModule.forFeature([Session, ChatMessage]), DatabaseModule],
+  providers: [SessionRepository, SessionCleanupService, ChatMessagesService],
+  exports: [SessionRepository, SessionCleanupService, ChatMessagesService, TypeOrmModule],
 })
 export class SessionsModule {}

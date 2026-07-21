@@ -12,6 +12,7 @@ export interface CreatePlanInput {
   issueId?: string;
   externalIssueRef?: string;
   dueDate?: Date;
+  contextId?: string;
 }
 
 @Injectable()
@@ -33,6 +34,7 @@ export class McpPlanService {
       sessionId: input.sessionId || undefined,
       projectId: this.isUuid(input.projectId) ? input.projectId : undefined,
       issueId: this.isUuid(input.issueId) ? input.issueId : undefined,
+      contextId: this.isUuid(input.contextId) ? input.contextId : undefined,
       status: McpPlanStatus.IN_PROGRESS,
       startedAt: new Date(),
     });
@@ -63,6 +65,11 @@ export class McpPlanService {
     this.logger.log(`🔗 [Plan:${planId.substring(0, 8)}] Linked to issue ${issueId}${externalRef ? ` (${externalRef})` : ''}`);
   }
 
+  async linkContext(planId: string, contextId: string): Promise<void> {
+    await this.repo.update(planId, { contextId });
+    this.logger.log(`🧠 [Plan:${planId.substring(0, 8)}] Linked to context ${contextId.substring(0, 8)}`);
+  }
+
   async updatePlan(planId: string, planData: Partial<McpPlanData>): Promise<void> {
     const existing = await this.repo.findOne({ where: { id: planId } });
     if (!existing) return;
@@ -81,7 +88,21 @@ export class McpPlanService {
 
   async abandon(planId: string): Promise<void> {
     await this.repo.update(planId, { status: McpPlanStatus.ABANDONED });
-    this.logger.log(`🚫 [Plan:${planId.substring(0, 8)}] Abandoned`);
+    this.logger.log(`❌ [Plan:${planId.substring(0, 8)}] Abandoned`);
+  }
+
+  async updateStatus(planId: string, status: McpPlanStatus): Promise<void> {
+    await this.repo.update(planId, { status });
+    this.logger.log(`🔄 [Plan:${planId.substring(0, 8)}] Status → ${status}`);
+  }
+
+  async delete(planId: string): Promise<{ contextId?: string }> {
+    const plan = await this.repo.findOne({ where: { id: planId } });
+    if (!plan) return {};
+    const contextId = plan.contextId;
+    await this.repo.remove(plan);
+    this.logger.log(`🗑️ [Plan:${planId.substring(0, 8)}] Deleted | context:${contextId ?? '-'}`);
+    return { contextId };
   }
 
   /**

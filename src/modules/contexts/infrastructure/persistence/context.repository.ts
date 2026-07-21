@@ -139,6 +139,16 @@ export class ContextRepository {
     );
   }
 
+  async deleteById(id: string): Promise<void> {
+    const context = await this.repository.findOne({ where: { id } });
+    if (context) {
+      await this.repository.remove(context);
+      if (context.projectId) {
+        await this.invalidateCache(context.projectId);
+      }
+    }
+  }
+
   private async invalidateCache(projectId: string): Promise<void> {
     await this.redisService.cacheDelete(`memory:${projectId}`);
   }

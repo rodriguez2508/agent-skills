@@ -70,7 +70,7 @@ export class ProjectsController {
   ) {
     const project = await this.projectsService.findById(id);
 
-    if (!project || project.userId !== userId) {
+    if (!project || (project.userId && project.userId !== userId)) {
       return {
         success: false,
         error: 'Proyecto no encontrado',

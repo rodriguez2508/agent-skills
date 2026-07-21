@@ -34,6 +34,7 @@ import { AgentRegistry } from '@core/agents/agent-registry';
 import { Project } from '@modules/projects/domain/entities/project.entity';
 import { ProjectDetection } from '@modules/projects/application/services/projects.service';
 import { MessageRole } from '@modules/sessions/domain/entities/chat-message.entity';
+import { ChatMessagesService } from '@modules/sessions/application/services/chat-messages.service';
 import { QueryBus } from '@nestjs/cqrs';
 import { GetAgentCatalogQuery } from '@modules/agency-agents/application/queries';
 import { McpPlanService } from '@modules/plans/application/services/mcp-plan.service';
@@ -98,6 +99,7 @@ export class SessionsController {
     private readonly queryBus: QueryBus,
     private readonly mcpPlanService: McpPlanService,
     private readonly agencyRepository: IAgencyRepository,
+    private readonly chatMessagesService: ChatMessagesService,
   ) {}
 
   @Post('start')
@@ -374,30 +376,30 @@ export class SessionsController {
       throw new BadRequestException(`Session ${sessionId} not found`);
     }
 
-    // 1. Persist the message in chat_messages
-    const role: MessageRole =
+    // 1. Persist the message in Redis (temporary, TTL 24h)
+    const role: 'user' | 'assistant' | 'system' =
       body.role === 'assistant'
-        ? MessageRole.ASSISTANT
+        ? 'assistant'
         : body.role === 'system'
-          ? MessageRole.SYSTEM
-          : MessageRole.USER;
-    const stored = await this.sessionRepository.addMessage({
+          ? 'system'
+          : 'user';
+    await this.chatMessagesService.addMessage(
       sessionId,
       role,
-      content: body.input,
-      issueId: session.issueId,
-    });
+      body.input,
+      { issueId: session.issueId },
+    );
 
     // 2. Index it as a context node (per project)
     if (session.projectId) {
       await this.contextNodes.indexMessage({
-        id: stored.id,
+        id: `msg-${Date.now()}`,
         projectId: session.projectId,
         sessionId,
         issueId: session.issueId,
         role,
         content: body.input,
-        createdAt: stored.createdAt,
+        createdAt: new Date(),
       });
     }
 
@@ -413,7 +415,6 @@ export class SessionsController {
     return {
       success: true,
       sessionId,
-      messageId: stored.id,
       indexed: !!session.projectId,
       relevantContext: relevant.map((r) => ({
         id: r.node.id,

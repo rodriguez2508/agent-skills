@@ -16,6 +16,7 @@ import { RouterAgent } from '@agents/router/router.agent';
 import { IdentityAgent } from '@agents/identity/identity.agent';
 import { AgentLoggerService } from '@infrastructure/logging/agent-logger.service';
 import { MessageRole } from '@modules/sessions/domain/entities/chat-message.entity';
+import { ChatMessagesService } from '@modules/sessions/application/services/chat-messages.service';
 import { SSEServerTransport } from '@modelcontextprotocol/sdk/server/sse.js';
 import { RedisService } from '@infrastructure/database/redis/redis.service';
 import { ProjectsService } from '@modules/projects/application/services/projects.service';
@@ -69,6 +70,7 @@ export class McpController {
     private readonly agentConfigRegistry: AgentConfigRegistryService,
     private readonly issueWorkflowAgent: IssueWorkflowAgent,
     private readonly issueService: IssueService,
+    private readonly chatMessagesService: ChatMessagesService,
   ) {}
 
   @Get('sse')
@@ -2845,26 +2847,35 @@ export class McpController {
       });
       this.logger.log(`📋 Plan created via API: ${plan.id} | ${title}`);
 
-      // Also save as memory in contexts
-      if (summary || title) {
+      // Consume messages from Redis and save as memory context
+      if (resolvedSessionId && resolvedSessionId !== 'unknown') {
         try {
-          await this.contextService.createContext({
-            projectId,
-            type: ContextType.MEMORY,
-            summary: `Plan: ${title}`,
-            extractedInfo: {
-              type: 'plan_memory',
-              content: summary || title,
-              planId: plan.id,
-              agentId: agentId || 'RouterAgent',
-              intention: intention || 'code',
-              tags: ['plan', intention || 'code'],
-              savedAt: new Date().toISOString(),
-            } as any,
-          });
-          this.logger.log(`🧠 Plan saved as memory: ${title}`);
+          const messages = await this.chatMessagesService.consumeMessages(resolvedSessionId);
+          if (messages.length > 0) {
+            const conversationContent = messages
+              .map((m) => `[${m.role}]: ${m.content}`)
+              .join('\n\n');
+            const ctx = await this.contextService.createContext({
+              projectId,
+              type: ContextType.MEMORY,
+              summary: `Conversación: ${title}`,
+              extractedInfo: {
+                type: 'conversation_memory',
+                content: conversationContent,
+                messageCount: messages.length,
+                planId: plan.id,
+                agentId: agentId || 'RouterAgent',
+                tags: ['conversation', intention || 'code'],
+                savedAt: new Date().toISOString(),
+              } as any,
+            });
+            await this.mcpPlanService.linkContext(plan.id, ctx.id);
+            this.logger.log(
+              `🧠 ${messages.length} messages migrated to memory context`,
+            );
+          }
         } catch (err) {
-          this.logger.warn(`Plan memory save failed: ${err.message}`);
+          this.logger.warn(`Message migration failed: ${err.message}`);
         }
       }
 
