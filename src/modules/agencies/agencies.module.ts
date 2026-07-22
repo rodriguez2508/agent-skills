@@ -19,6 +19,11 @@ import { AuthModule } from '@modules/auth/auth.module';
 import { Agency } from './domain/entities/agency.entity';
 import { AgencyMember } from './domain/entities/agency-member.entity';
 import { AgencyTemplate } from './domain/entities/agency-template.entity';
+import { AgencySkill } from '@agency-resources/domain/entities/agency-skill.entity';
+import { AgencyAgent } from '@agency-resources/domain/entities/agency-agent.entity';
+import { Project } from '@modules/projects/domain/entities/project.entity';
+import { Session } from '@modules/sessions/domain/entities/session.entity';
+import { Context } from '@modules/contexts/domain/entities/context.entity';
 
 // Ports
 import { IAgencyRepository } from './domain/ports/agency-repository.port';
@@ -55,7 +60,7 @@ const Guards = [AgencyGuard];
   imports: [
     CqrsModule,
     forwardRef(() => AuthModule),
-    TypeOrmModule.forFeature([Agency, AgencyMember, AgencyTemplate]),
+    TypeOrmModule.forFeature([Agency, AgencyMember, AgencyTemplate, AgencySkill, AgencyAgent, Project, Session, Context]),
   ],
   controllers: [AgenciesController],
   providers: [

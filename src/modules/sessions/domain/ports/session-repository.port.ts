@@ -34,14 +34,6 @@ export abstract class ISessionRepository {
 
   abstract getRecentSessions(limit?: number): Promise<any[]>;
 
-  abstract addMessage(data: {
-    sessionId: string;
-    role: string;
-    content: string;
-    metadata?: any;
-    tokenCount?: number;
-  }): Promise<any>;
-
   abstract updateStatus(sessionId: string, status: SessionStatus): Promise<any>;
 
   abstract close(sessionId: string): Promise<any>;

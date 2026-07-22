@@ -6,6 +6,7 @@ import { AgencySkill } from '@agency-resources/domain/entities/agency-skill.enti
 import { AgencyRule } from '@agency-resources/domain/entities/agency-rule.entity';
 import { AgencyAgent } from '@agency-resources/domain/entities/agency-agent.entity';
 import { AgencyWorkflow } from '@agency-resources/domain/entities/agency-workflow.entity';
+import { AgentCategory } from '@modules/agency-agents/domain/entities/agent-category.entity';
 
 import { IAgencyResourcesRepository } from '@agency-resources/domain/ports/agency-resources-repository.port';
 import { AGENCY_RESOURCES_REPOSITORY } from '@agency-resources/domain/tokens';
@@ -42,8 +43,9 @@ import { AgencyRulesController } from '@agency-resources/presentation/controller
 import { AgencyAgentsController } from '@agency-resources/presentation/controllers/agency-agents.controller';
 import { AgencyWorkflowsController } from '@agency-resources/presentation/controllers/agency-workflows.controller';
 import { MarketplaceController } from '@agency-resources/presentation/controllers/marketplace.controller';
+import { AgencyResourcesCategoriesController } from '@agency-resources/presentation/controllers/agency-resources-categories.controller';
 
-const Entities = [AgencySkill, AgencyRule, AgencyAgent, AgencyWorkflow];
+const Entities = [AgencySkill, AgencyRule, AgencyAgent, AgencyWorkflow, AgentCategory];
 
 const CommandHandlers = [
   CreateSkillHandler,
@@ -81,6 +83,7 @@ const QueryHandlers = [
     AgencyAgentsController,
     AgencyWorkflowsController,
     MarketplaceController,
+    AgencyResourcesCategoriesController,
   ],
   providers: [
     ...CommandHandlers,

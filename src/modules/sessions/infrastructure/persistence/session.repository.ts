@@ -9,10 +9,6 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, LessThanOrEqual } from 'typeorm';
 import { Session, SessionStatus } from '../../domain/entities/session.entity';
 import {
-  ChatMessage,
-  MessageRole,
-} from '../../domain/entities/chat-message.entity';
-import {
   ISessionRepository,
   CreateSessionDto,
   SessionStats,
@@ -25,8 +21,6 @@ export class SessionRepository implements ISessionRepository {
   constructor(
     @InjectRepository(Session)
     private readonly repository: Repository<Session>,
-    @InjectRepository(ChatMessage)
-    private readonly messageRepository: Repository<ChatMessage>,
   ) {}
 
   /**
@@ -73,7 +67,6 @@ export class SessionRepository implements ISessionRepository {
   async findById(id: string): Promise<Session | null> {
     return this.repository.findOne({
       where: { id },
-      relations: ['messages'],
     });
   }
 
@@ -136,73 +129,6 @@ export class SessionRepository implements ISessionRepository {
       },
       order: { lastActivityAt: 'ASC' },
     });
-  }
-
-  /**
-   * Get all messages for a session
-   */
-  async getMessages(sessionId: string, limit = 50): Promise<ChatMessage[]> {
-    return this.messageRepository.find({
-      where: { sessionId },
-      order: { createdAt: 'ASC' },
-      take: limit,
-    });
-  }
-
-  /**
-   * Add a message to a session
-   */
-  async addMessage(data: {
-    sessionId: string;
-    role: MessageRole;
-    content: string;
-    issueId?: string; // NEW: Link message to specific issue
-    metadata?: any;
-    tokenCount?: number;
-  }): Promise<ChatMessage> {
-    const session = await this.findBySessionId(data.sessionId);
-
-    if (!session) {
-      throw new Error(`Session not found: ${data.sessionId}`);
-    }
-
-    // Check if session is still active
-    if (session.status !== SessionStatus.ACTIVE) {
-      throw new Error(
-        `Session is not active: ${data.sessionId} (status: ${session.status})`,
-      );
-    }
-
-    const message = this.messageRepository.create({
-      sessionId: session.sessionId,
-      role: data.role,
-      content: data.content,
-      metadata: data.metadata,
-      tokenCount: data.tokenCount || 0,
-    });
-
-    // Set issueId separately to avoid type issues
-    if (data.issueId) {
-      message.issueId = data.issueId;
-    }
-
-    const saved = await this.messageRepository.save(message);
-
-    // Update session counters
-    session.messageCount += 1;
-    session.lastActivityAt = new Date();
-
-    // Validate session on first message (first meaningful interaction)
-    if (!session.isValidated) {
-      session.isValidated = true;
-      session.validatedAt = new Date();
-      this.logger.debug(`✅ Session validated: ${session.id}`);
-    }
-
-    await this.repository.save(session);
-
-    this.logger.debug(`💬 Message added to session ${session.id}`);
-    return saved;
   }
 
   /**

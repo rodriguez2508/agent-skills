@@ -16,7 +16,6 @@
 import { Injectable, Logger, Optional } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
-import { ChatMessage } from '@modules/sessions/domain/entities/chat-message.entity';
 import { Session } from '@modules/sessions/domain/entities/session.entity';
 import { RedisService } from '@infrastructure/database/redis/redis.service';
 
@@ -71,8 +70,6 @@ export class ContextNodeService {
   private readonly BM25_CACHE_TTL = 60 * 60 * 24 * 7; // 7 días
 
   constructor(
-    @InjectRepository(ChatMessage)
-    private readonly messageRepository: Repository<ChatMessage>,
     @InjectRepository(Session)
     private readonly sessionRepository: Repository<Session>,
     @Optional() private readonly redisService?: RedisService,
@@ -294,49 +291,6 @@ export class ContextNodeService {
       hydratedAt: new Date(),
     };
     this.indices.set(projectId, index);
-
-    const sessions = await this.sessionRepository.find({
-      where: { projectId },
-      select: ['sessionId'],
-    });
-    if (sessions.length === 0) return index;
-
-    const sessionIds = sessions.map((s) => s.sessionId);
-    const messages = await this.messageRepository
-      .createQueryBuilder('m')
-      .where('m.session_id IN (:...sessionIds)', { sessionIds })
-      .orderBy('m.created_at', 'DESC')
-      .take(this.maxHistorySize)
-      .getMany();
-
-    for (const m of messages) {
-      this.addNodeToIndex(index, {
-        id: m.id,
-        projectId,
-        sessionId: m.sessionId,
-        issueId: m.issueId,
-        role: String(m.role),
-        content: m.content,
-        createdAt: m.createdAt,
-      });
-    }
-    this.logger.debug(
-      `🔎 Hydrated context index for project ${projectId}: ${index.nodes.size} nodes`,
-    );
-
-    // Persistir en Redis para próximos arranques
-    if (this.redisService && index.nodes.size > 0) {
-      try {
-        await this.redisService.set(
-          `bm25:index:${projectId}`,
-          this.serializeIndex(index),
-          this.BM25_CACHE_TTL,
-        );
-      } catch (e) {
-        this.logger.warn(`Failed to persist BM25 index to Redis: ${e.message}`);
-      }
-    }
-
     return index;
   }
 

@@ -15,10 +15,11 @@ export interface CreateAgencySkillData {
   name: string;
   description?: string;
   promptTemplate: string;
-  agentType?: string;
+  categoryId?: string | null;
   tags?: string[];
   inputVariables?: string[];
   isPublished?: boolean;
+  isPermanent?: boolean;
 }
 
 export interface CreateAgencyRuleData {

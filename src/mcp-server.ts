@@ -23,6 +23,10 @@ const server = new Server(
 const PORT = process.env.PORT || 8004;
 const API_URL = `http://localhost:${PORT}`;
 
+// Session state: stores the real MCP session ID from init-auto
+let currentSessionId: string | null = null;
+let currentClientId: string | null = null;
+
 // Tool Definitions
 const TOOLS = [
   {
@@ -990,11 +994,15 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           projectContext = await detectProject(detectedPath);
         }
 
-        const session = sessionId || `session-${Date.now()}`;
+        // Use the real MCP session ID from init-auto, not the CLI's UUID
+        const session = currentSessionId || sessionId || `session-${Date.now()}`;
 
         const response = await fetch(`${API_URL}/mcp/chat`, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: {
+            'Content-Type': 'application/json',
+            'x-session-id': session || '',
+          },
           body: JSON.stringify({
             input,
             sessionId: session,
@@ -1274,6 +1282,11 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         let sessionId = args?.sessionId as string | undefined;
         const agentHint = args?.agentHint as string | undefined;
 
+        // Use the real MCP session ID from init-auto
+        if (!sessionId || !sessionId.startsWith('mcp-')) {
+          sessionId = currentSessionId || sessionId;
+        }
+
         // Auto-start session if not provided
         if (!sessionId) {
           const projectPath = (await detectProjectPath()) || undefined;
@@ -1296,6 +1309,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           headers: {
             'Content-Type': 'application/json',
             'x-client-id': clientId,
+            'x-session-id': sessionId || '',
           },
           body: JSON.stringify({
             input,
@@ -1353,6 +1367,12 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
               }
             }
           } catch (_) {}
+        }
+
+        // Store the real MCP session ID for subsequent agent_query calls
+        if (data?.sessionId) {
+          currentSessionId = data.sessionId;
+          currentClientId = clientId;
         }
 
         result = JSON.stringify(data, null, 2);

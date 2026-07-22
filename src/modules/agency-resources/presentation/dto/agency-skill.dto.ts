@@ -25,8 +25,7 @@ export class CreateAgencySkillDto {
 
   @IsOptional()
   @IsString()
-  @MaxLength(50)
-  agentType?: string;
+  categoryId?: string | null;
 
   @IsOptional()
   @IsArray()
@@ -41,6 +40,10 @@ export class CreateAgencySkillDto {
   @IsOptional()
   @IsBoolean()
   isPublished?: boolean;
+
+  @IsOptional()
+  @IsBoolean()
+  isPermanent?: boolean;
 }
 
 export class UpdateAgencySkillDto {
@@ -59,8 +62,7 @@ export class UpdateAgencySkillDto {
 
   @IsOptional()
   @IsString()
-  @MaxLength(50)
-  agentType?: string;
+  categoryId?: string | null;
 
   @IsOptional()
   @IsArray()
@@ -79,4 +81,8 @@ export class UpdateAgencySkillDto {
   @IsOptional()
   @IsBoolean()
   isActive?: boolean;
+
+  @IsOptional()
+  @IsBoolean()
+  isPermanent?: boolean;
 }

@@ -29,6 +29,7 @@ import {
 import { AgentConfigRegistryService } from '@infrastructure/adapters/agent-config/agent-config-registry.service';
 import { IAgencyResourcesRepository } from '@agency-resources/domain/ports/agency-resources-repository.port';
 import { AGENCY_RESOURCES_REPOSITORY } from '@agency-resources/domain/tokens';
+import { AgencySearchService } from '@agency-resources/application/services/agency-search.service';
 import * as fs from 'fs/promises';
 import * as path from 'path';
 import { promisify } from 'util';
@@ -66,6 +67,7 @@ export class McpService {
     private readonly agentConfigRegistry: AgentConfigRegistryService,
     @Inject(AGENCY_RESOURCES_REPOSITORY)
     private readonly agencyResourcesRepository: IAgencyResourcesRepository,
+    private readonly agencySearchService: AgencySearchService,
   ) {
     this.apiPort = this.configService.get<number>('PORT', 8004);
   }
@@ -1182,7 +1184,10 @@ When in doubt, ALWAYS use the agent_query tool first.`,
 
           const response = await fetch(url, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: {
+              'Content-Type': 'application/json',
+              'x-session-id': sid || '',
+            },
             body: JSON.stringify({
               input: message,
               options: { context, sessionId: sid, language: 'es' },
@@ -1282,7 +1287,10 @@ When in doubt, ALWAYS use the agent_query tool first.`,
 
           const response = await fetch(url, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: {
+              'Content-Type': 'application/json',
+              'x-session-id': sid || '',
+            },
             body: JSON.stringify({
               input: message,
               options: { context, sessionId: sid },
@@ -1644,7 +1652,10 @@ When in doubt, ALWAYS use the agent_query tool first.`,
             `http://localhost:${this.apiPort}/mcp/chat`,
             {
               method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
+              headers: {
+                'Content-Type': 'application/json',
+                'x-session-id': sessionId || '',
+              },
               body: JSON.stringify({
                 input: `Lista los issues ${state} de github.com/${owner || 'owner'}/${repo || 'repo'}`,
                 options: { sessionId, githubOwner: owner, githubRepo: repo },
@@ -1688,7 +1699,10 @@ When in doubt, ALWAYS use the agent_query tool first.`,
             `http://localhost:${this.apiPort}/mcp/chat`,
             {
               method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
+              headers: {
+                'Content-Type': 'application/json',
+                'x-session-id': sessionId || '',
+              },
               body: JSON.stringify({
                 input: `Lee el PR ${prRef} de github.com/${owner || 'owner'}/${repo || 'repo'}`,
                 options: { sessionId, githubOwner: owner, githubRepo: repo },
@@ -1734,7 +1748,10 @@ When in doubt, ALWAYS use the agent_query tool first.`,
             `http://localhost:${this.apiPort}/mcp/chat`,
             {
               method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
+              headers: {
+                'Content-Type': 'application/json',
+                'x-session-id': sessionId || '',
+              },
               body: JSON.stringify({
                 input: `Analiza el repo github.com/${owner}/${repo}`,
                 options: { sessionId, githubOwner: owner, githubRepo: repo },
@@ -3010,6 +3027,74 @@ When in doubt, ALWAYS use the agent_query tool first.`,
         } catch (error) {
           const msg = error instanceof Error ? error.message : 'Error';
           return { content: [{ type: 'text' as const, text: `❌ Error: ${msg}` }], isError: true };
+        }
+      },
+    );
+
+    // agency_search — Búsqueda semántica de todos los recursos de la agencia (skills + rules + agents)
+    server.tool(
+      'agency_search',
+      'Busca en todos los recursos de la agencia (skills, reglas, agentes) usando búsqueda semántica por embeddings. Retorna los resultados más relevantes con sus scores. Ideal para preguntas como "¿qué skills tengo?", "¿qué reglas aplican a X?", "¿qué agentes hay disponibles?".',
+      {
+        query: z.string().describe('La pregunta o búsqueda en lenguaje natural'),
+        limit: z.number().optional().describe('Número máximo de resultados (default: 5)'),
+        sessionId: z.string().optional().describe('Session ID para obtener el agencyId'),
+      },
+      async ({ query, limit, sessionId }, extra) => {
+        const sid = sessionId || extra?.sessionId || 'unknown';
+
+        this.logger.log(
+          `🔍 MCP: agency_search called - query="${query.substring(0, 100)}..." | sessionId: ${sid}`,
+        );
+
+        try {
+          // Resolve agencyId from session
+          let agencyId = await this.redisService.get<string>(`session:${sid}:agencyId`);
+
+          if (!agencyId) {
+            return {
+              content: [{
+                type: 'text' as const,
+                text: '⚠️ No se encontró una agencia asociada a esta sesión. Asegúrate de tener una sesión activa con agencyId.',
+              }],
+            };
+          }
+
+          const results = await this.agencySearchService.search(agencyId, query, limit || 5);
+
+          if (results.length === 0) {
+            return {
+              content: [{
+                type: 'text' as const,
+                text: `🔍 No encontré resultados para "${query}" en los recursos de la agencia.`,
+              }],
+            };
+          }
+
+          // Format response
+          let text = `🔍 **Resultados de búsqueda** (${results.length} encontrados)\n\n`;
+
+          for (const result of results) {
+            const icon = result.type === 'skill' ? '🎯' : result.type === 'rule' ? '📏' : '🤖';
+            const scorePercent = Math.min(100, Math.round(result.score * 10)).toString();
+
+            text += `### ${icon} ${result.name}\n`;
+            text += `**Tipo:** ${result.type} | **Relevancia:** ${scorePercent}%\n`;
+            text += `${result.text.substring(0, 300)}${result.text.length > 300 ? '...' : ''}\n\n`;
+          }
+
+          this.logger.log(
+            `✅ MCP: agency_search completed - ${results.length} results (top score: ${results[0].score.toFixed(2)})`,
+          );
+
+          return { content: [{ type: 'text' as const, text }] };
+        } catch (error) {
+          const msg = error instanceof Error ? error.message : 'Error';
+          this.logger.error(`❌ MCP: agency_search failed - ${msg}`);
+          return {
+            content: [{ type: 'text' as const, text: `❌ Error en la búsqueda: ${msg}` }],
+            isError: true,
+          };
         }
       },
     );

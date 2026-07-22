@@ -9,6 +9,7 @@ import {
   Index,
 } from 'typeorm';
 import { Agency } from '../../../agencies/domain/entities/agency.entity';
+import { AgentCategory } from '@modules/agency-agents/domain/entities/agent-category.entity';
 
 @Entity('agency_skills')
 @Index(['agencyId', 'name'], { unique: true })
@@ -29,8 +30,12 @@ export class AgencySkill {
   @Column({ type: 'text', name: 'prompt_template' })
   promptTemplate!: string;
 
-  @Column({ type: 'varchar', length: 50, name: 'agent_type', default: 'general' })
-  agentType!: string;
+  @Column({ type: 'uuid', name: 'category_id', nullable: true })
+  categoryId!: string | null;
+
+  @ManyToOne(() => AgentCategory, { eager: true, onDelete: 'SET NULL', nullable: true })
+  @JoinColumn({ name: 'category_id' })
+  category!: AgentCategory | null;
 
   @Column({ type: 'simple-array', default: '' })
   tags!: string[];
@@ -49,6 +54,9 @@ export class AgencySkill {
 
   @Column({ type: 'boolean', name: 'is_active', default: true })
   isActive!: boolean;
+
+  @Column({ type: 'boolean', name: 'is_permanent', default: false })
+  isPermanent!: boolean;
 
   @ManyToOne(() => Agency, { onDelete: 'CASCADE' })
   @JoinColumn({ name: 'agency_id' })

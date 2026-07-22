@@ -1968,7 +1968,7 @@ export class McpController {
           this.logger.log(`🤖 Executing specialized agent: ${targetAgentId}`);
           try {
             const agentResponse = await targetAgent.execute({
-              input,
+              input: response.data.nextAction.task || input,
               options: {
                 ...optionsWithIssue,
                 sessionId,

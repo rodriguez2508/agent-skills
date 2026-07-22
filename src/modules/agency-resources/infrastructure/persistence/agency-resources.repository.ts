@@ -45,10 +45,11 @@ export class AgencyResourcesRepository implements IAgencyResourcesRepository {
       name: data.name,
       description: data.description,
       promptTemplate: data.promptTemplate,
-      agentType: data.agentType || 'general',
+      categoryId: data.categoryId || null,
       tags: data.tags || [],
       inputVariables: data.inputVariables || [],
       isPublished: data.isPublished || false,
+      isPermanent: data.isPermanent || false,
     });
     const saved = await this.skillRepo.save(skill);
     this.logger.debug(`🎨 Skill created: ${saved.id} (${saved.name})`);

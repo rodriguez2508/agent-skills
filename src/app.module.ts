@@ -11,6 +11,7 @@ import { AgentLoggerService } from '@infrastructure/logging/agent-logger.service
 import { RulesEngine } from '@infrastructure/rules/rules-engine';
 import { VectorStorageModule } from '@infrastructure/vector-storage/vector-storage.module';
 import { DatabaseModule } from '@infrastructure/database/database.module';
+import { AgencySearchService } from '@modules/agency-resources/application/services/agency-search.service';
 
 // Presentation
 import { HealthController } from '@core/presentation/controllers/health/health.controller';
@@ -140,6 +141,7 @@ import { AgencyResourcesModule } from '@modules/agency-resources/agency-resource
     },
 
     McpService,
+    AgencySearchService,
     AgentLoggerService,
     RulesEngine,
 

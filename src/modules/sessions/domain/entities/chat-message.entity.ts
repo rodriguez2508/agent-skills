@@ -10,11 +10,8 @@ import {
   PrimaryGeneratedColumn,
   Column,
   CreateDateColumn,
-  ManyToOne,
-  JoinColumn,
   Index,
 } from 'typeorm';
-import { Session } from './session.entity';
 
 export enum MessageRole {
   USER = 'user',
@@ -31,13 +28,6 @@ export class ChatMessage {
   @Index()
   sessionId: string;
 
-  @ManyToOne(() => Session, (session) => session.messages, {
-    onDelete: 'CASCADE',
-  })
-  @JoinColumn({ name: 'session_id', referencedColumnName: 'sessionId' })
-  session?: Session;
-
-  // NEW: Link message to specific issue (optional, for better tracking)
   @Column({ name: 'issue_id', type: 'uuid', nullable: true })
   @Index()
   issueId?: string;

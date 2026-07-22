@@ -62,6 +62,25 @@ export interface AddMemberRequestDto {
 //  Response DTOs
 // ───────────────────────────────
 
+export interface AgencyStatsDto {
+  totalAgents: number;
+  totalProjects: number;
+  totalSessions: number;
+  totalMemoryItems: number;
+  totalSkills: number;
+}
+
+export interface SessionSummaryDto {
+  id: string;
+  sessionId: string;
+  status: string;
+  title?: string;
+  messageCount: number;
+  metadata?: Record<string, any>;
+  createdAt: Date;
+  lastActivityAt?: Date;
+}
+
 export interface AgencyResponseDto {
   id: string;
   name: string;
@@ -69,9 +88,12 @@ export interface AgencyResponseDto {
   description?: string;
   logo?: string;
   ownerId: string;
+  ownerEmail?: string;
   planTier: string;
+  isActive: boolean;
   isPublic: boolean;
   settings?: Record<string, any>;
+  stats?: AgencyStatsDto;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -115,7 +137,10 @@ export interface AgencyTemplateDto {
 //  Mappers
 // ───────────────────────────────
 
-export function toAgencyResponse(agency: Agency): AgencyResponseDto {
+export function toAgencyResponse(
+  agency: Agency,
+  extras?: { ownerEmail?: string; stats?: AgencyStatsDto },
+): AgencyResponseDto {
   return {
     id: agency.id,
     name: agency.name,
@@ -123,9 +148,12 @@ export function toAgencyResponse(agency: Agency): AgencyResponseDto {
     description: agency.description,
     logo: agency.logo,
     ownerId: agency.ownerId,
+    ownerEmail: extras?.ownerEmail,
     planTier: agency.planTier,
+    isActive: true,
     isPublic: agency.isPublic,
     settings: agency.settings as Record<string, any> | undefined,
+    stats: extras?.stats,
     createdAt: agency.createdAt,
     updatedAt: agency.updatedAt,
   };

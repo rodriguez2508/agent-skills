@@ -17,10 +17,8 @@ import {
   ManyToOne,
   JoinColumn,
   Index,
-  OneToMany,
 } from 'typeorm';
 import { User } from '@modules/users/domain/entities/user.entity';
-import { ChatMessage } from './chat-message.entity';
 
 export enum SessionStatus {
   ACTIVE = 'active',
@@ -105,8 +103,4 @@ export class Session {
 
   @UpdateDateColumn({ name: 'updated_at' })
   updatedAt: Date;
-
-  @OneToMany(() => ChatMessage, (message) => message.session, { cascade: true })
-  @JoinColumn({ name: 'session_id', referencedColumnName: 'sessionId' })
-  messages?: ChatMessage[];
 }

@@ -292,7 +292,7 @@ export class SessionsController {
       throw new BadRequestException(`Session ${sessionId} not found`);
     }
 
-    const messages = await this.sessionRepository.getMessages(sessionId, limit);
+    const messages = await this.chatMessagesService.getMessages(sessionId);
 
     const project = session.projectId
       ? await this.projectsService.findById(session.projectId)
@@ -337,7 +337,7 @@ export class SessionsController {
         role: m.role,
         content: m.content,
         agentId: (m.metadata as any)?.agentId,
-        createdAt: m.createdAt,
+        createdAt: m.timestamp,
       })),
     };
   }

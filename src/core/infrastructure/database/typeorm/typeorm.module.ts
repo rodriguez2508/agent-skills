@@ -12,7 +12,6 @@ import { createTypeORMConfig } from './typeorm.config';
 // Entities - from domain modules
 import { User } from '@modules/users/domain/entities/user.entity';
 import { Session } from '@modules/sessions/domain/entities/session.entity';
-import { ChatMessage } from '@modules/sessions/domain/entities/chat-message.entity';
 import { Project } from '@modules/projects/domain/entities/project.entity';
 import { Issue } from '@modules/issues/domain/entities/issue.entity';
 import { Context } from '@modules/contexts/domain/entities/context.entity';
@@ -27,7 +26,6 @@ import { Context } from '@modules/contexts/domain/entities/context.entity';
     TypeOrmModule.forFeature([
       User,
       Session,
-      ChatMessage,
       Project,
       Issue,
       Context,

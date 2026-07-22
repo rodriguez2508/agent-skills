@@ -22,6 +22,8 @@ import {
 } from '@nestjs/common';
 import { CommandBus, QueryBus } from '@nestjs/cqrs';
 import { Logger } from '@nestjs/common';
+import { InjectRepository } from '@nestjs/typeorm';
+import { Repository, In } from 'typeorm';
 
 // Auth
 import { AuthGuard } from '@modules/auth/guard/auth.guard';
@@ -49,15 +51,25 @@ import {
   AddMemberRequestDto,
   AgencyDetailResponseDto,
   AgencyResponseDto,
+  AgencyStatsDto,
   AgencyTemplateDto,
+  SessionSummaryDto,
   toAgencyResponse,
   toAgencyDetailResponse,
   toTemplateDto,
 } from '../dto/agency.dto';
 
+// Entities for stats counting
+import { AgencySkill } from '@agency-resources/domain/entities/agency-skill.entity';
+import { AgencyAgent } from '@agency-resources/domain/entities/agency-agent.entity';
+import { Project } from '@modules/projects/domain/entities/project.entity';
+import { Session } from '@modules/sessions/domain/entities/session.entity';
+import { Context } from '@modules/contexts/domain/entities/context.entity';
+
 // Repository for direct queries (query-only, no service layer)
 import { IAgencyRepository } from '@modules/agencies/domain/ports/agency-repository.port';
 import { UserRepository } from '@modules/users/infrastructure/persistence/user.repository';
+import { SessionRepository } from '@modules/sessions/infrastructure/persistence/session.repository';
 
 @Controller('agencies')
 export class AgenciesController {
@@ -68,6 +80,12 @@ export class AgenciesController {
     private readonly queryBus: QueryBus,
     private readonly agencyRepository: IAgencyRepository,
     private readonly userRepository: UserRepository,
+    private readonly sessionRepository: SessionRepository,
+    @InjectRepository(AgencySkill) private readonly skillRepo: Repository<AgencySkill>,
+    @InjectRepository(AgencyAgent) private readonly agentRepo: Repository<AgencyAgent>,
+    @InjectRepository(Project) private readonly projectRepo: Repository<Project>,
+    @InjectRepository(Session) private readonly sessionRepo: Repository<Session>,
+    @InjectRepository(Context) private readonly contextRepo: Repository<Context>,
   ) {}
 
   // ───────────────────────────────
@@ -107,7 +125,7 @@ export class AgenciesController {
     const agencies = isPublic === 'true'
       ? await this.agencyRepository.findPublic()
       : await this.agencyRepository.findAll();
-    return agencies.map(toAgencyResponse);
+    return agencies.map(a => toAgencyResponse(a));
   }
 
   @Get('by-user/:userId')
@@ -119,7 +137,12 @@ export class AgenciesController {
     if (!agencies.length) {
       throw new NotFoundException(`No agency found for user ${userId}`);
     }
-    return toAgencyResponse(agencies[0]);
+    const agency = agencies[0];
+
+    const owner = await this.userRepository.findById(agency.ownerId);
+    const stats = await this.getAgencyStats(agency.id, agency.ownerId);
+
+    return toAgencyResponse(agency, { ownerEmail: owner?.email, stats });
   }
 
   @Get(':identifier')
@@ -180,6 +203,78 @@ export class AgenciesController {
   @HttpCode(HttpStatus.NO_CONTENT)
   async deleteAgency(@Param('id', ParseUUIDPipe) id: string): Promise<void> {
     await this.agencyRepository.delete(id);
+  }
+
+  // ───────────────────────────────
+  //  Stats
+  // ───────────────────────────────
+
+  @Get(':id/stats')
+  async getAgencyStatsEndpoint(
+    @Param('id', ParseUUIDPipe) id: string,
+  ): Promise<AgencyStatsDto> {
+    this.logger.log(`GET /agencies/${id}/stats`);
+    const agency = await this.agencyRepository.findById(id);
+    if (!agency) throw new NotFoundException(`Agency ${id} not found`);
+    return this.getAgencyStats(id, agency.ownerId);
+  }
+
+  private async getAgencyStats(agencyId: string, ownerId: string): Promise<AgencyStatsDto> {
+    const [totalSkills, totalAgents, projects] = await Promise.all([
+      this.skillRepo.count({ where: { agencyId } }),
+      this.agentRepo.count({ where: { agencyId } }),
+      this.projectRepo.find({ where: { userId: ownerId }, select: ['id'] }),
+    ]);
+
+    const ids = projects.map(p => p.id);
+
+    const sessionConditions: any[] = [{ userId: ownerId }];
+    const contextConditions: any[] = [];
+
+    if (ids.length > 0) {
+      sessionConditions.push({ projectId: In(ids) });
+      contextConditions.push({ projectId: In(ids) });
+    }
+
+    const [totalSessions, totalMemoryItems] = await Promise.all([
+      this.sessionRepo.count({ where: sessionConditions }),
+      contextConditions.length > 0
+        ? this.contextRepo.count({ where: contextConditions })
+        : Promise.resolve(0),
+    ]);
+
+    return {
+      totalAgents,
+      totalProjects: projects.length,
+      totalSessions,
+      totalMemoryItems,
+      totalSkills,
+    };
+  }
+
+  // ───────────────────────────────
+  //  Sessions
+  // ───────────────────────────────
+
+  @Get(':id/sessions')
+  async getAgencySessions(
+    @Param('id', ParseUUIDPipe) id: string,
+  ): Promise<SessionSummaryDto[]> {
+    this.logger.log(`GET /agencies/${id}/sessions`);
+    const agency = await this.agencyRepository.findById(id);
+    if (!agency) throw new NotFoundException(`Agency ${id} not found`);
+
+    const sessions = await this.sessionRepository.findByUserId(agency.ownerId, 50);
+    return sessions.map(s => ({
+      id: s.id,
+      sessionId: s.sessionId,
+      status: s.status,
+      title: s.title,
+      messageCount: s.messageCount,
+      metadata: s.metadata as Record<string, any> | undefined,
+      createdAt: s.createdAt,
+      lastActivityAt: s.lastActivityAt,
+    }));
   }
 
   // ───────────────────────────────

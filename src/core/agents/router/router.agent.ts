@@ -27,6 +27,8 @@ import { ContextRepository } from '@modules/contexts/infrastructure/persistence/
 import { ContextType } from '@modules/contexts/domain/entities/context.entity';
 import { IAgencyResourcesRepository } from '@agency-resources/domain/ports/agency-resources-repository.port';
 import { AGENCY_RESOURCES_REPOSITORY } from '@agency-resources/domain/tokens';
+import { EmbeddingService } from '@infrastructure/vector-storage/embedding.service';
+import { AgencySearchService } from '@agency-resources/application/services/agency-search.service';
 
 /**
  * RouterAgent - Orquestador principal de agentes
@@ -46,6 +48,8 @@ export class RouterAgent extends BaseAgent {
     private readonly contextRepository: ContextRepository,
     @Inject(AGENCY_RESOURCES_REPOSITORY)
     private readonly agencyResourcesRepo: IAgencyResourcesRepository,
+    private readonly embeddingService: EmbeddingService,
+    private readonly agencySearchService: AgencySearchService,
   ) {
     super(
       'RouterAgent',
@@ -128,6 +132,59 @@ export class RouterAgent extends BaseAgent {
         this.agentLogger.warn(
           this.agentId,
           `⚠️ Error matching agency skills: ${err.message}`,
+        );
+      }
+    }
+
+    // ── AGENCY SEARCH: Búsqueda semántica unificada (skills + rules + agents) ──
+    if (agencyId) {
+      try {
+        const searchResults = await this.agencySearchService.search(agencyId, rawInput, 3);
+        if (searchResults.length > 0 && searchResults[0].score >= 1.5) {
+          const top = searchResults[0];
+
+          // Only return direct answer for permanent skills (they're always injected anyway)
+          const isPermanentSkill = top.type === 'skill' && top.entity?.isPermanent;
+
+          if (isPermanentSkill) {
+            this.agentLogger.info(
+              this.agentId,
+              `🔍 [ROUTER] Permanent skill "${top.name}" matched via search (score: ${top.score.toFixed(2)}) — direct answer`,
+            );
+
+            const skillContent = top.entity?.promptTemplate || top.text;
+
+            return {
+              success: true,
+              data: {
+                message: skillContent,
+                targetAgent: 'AgencySearch',
+                agentExecuted: 'AgencySearch',
+                nextAction: {
+                  type: 'answer' as const,
+                  agent: 'AgencySearch',
+                  action: 'answer',
+                  task: rawInput,
+                },
+                searchResult: {
+                  type: top.type,
+                  name: top.name,
+                  score: top.score,
+                },
+                relevantRules: allRules,
+              },
+              metadata: {
+                agentId: 'AgencySearch',
+                executionTime: Date.now(),
+                timestamp: new Date(),
+              },
+            };
+          }
+        }
+      } catch (err) {
+        this.agentLogger.warn(
+          this.agentId,
+          `⚠️ Agency search failed (falling through to normal routing): ${err.message}`,
         );
       }
     }
@@ -993,62 +1050,69 @@ export class RouterAgent extends BaseAgent {
   }
 
   /**
-   * Busca skills de la agencia que coincidan con el input del usuario.
-   * Matching por: nombre, tags, descripción (case-insensitive, substring).
-   * Retorna el promptTemplate de la skill más relevante, o '' si no hay match.
+   * Matching híbrido: skills permanentes SIEMPRE + BM25-lite + Vector similarity para las demás.
+   * Retorna los promptTemplates concatenados de todas las skills que apliquen.
    */
   private async matchAgencySkills(agencyId: string, input: string): Promise<string> {
     const skills = await this.agencyResourcesRepo.findSkillsByAgencyId(agencyId);
     if (!skills || skills.length === 0) return '';
 
+    // 1. Skills permanentes: SIEMPRE se inyectan
+    const permanentSkills = skills.filter(s => s.isPermanent);
+    const permanentPrompts = permanentSkills.map(s =>
+      `\n\n--- AGENCY SKILL: ${s.name} ---\n${s.promptTemplate}\n--- END AGENCY SKILL ---\n\n`
+    ).join('');
+
+    // 2. Matching híbrido para skills no-permanentes
+    const candidateSkills = skills.filter(s => !s.isPermanent && s.isActive);
+    if (!candidateSkills.length) return permanentPrompts;
+
     const lowerInput = input.toLowerCase();
-    const words = lowerInput.split(/\s+/).filter(w => w.length > 3);
+    const words = lowerInput.split(/\s+/).filter(w => w.length > 2);
+    if (words.length === 0) return permanentPrompts;
 
-    let bestSkill: { name: string; score: number; promptTemplate: string } | null = null;
+    let bestScore = -1;
+    let bestSkill: typeof candidateSkills[0] | null = null;
 
-    for (const skill of skills) {
+    for (const skill of candidateSkills) {
       let score = 0;
-      const skillName = skill.name.toLowerCase();
-      const skillDesc = (skill.description || '').toLowerCase();
-      const skillTags = (skill.tags || []).map(t => t.toLowerCase());
+      const skillText = `${skill.name} ${skill.description || ''} ${(skill.tags || []).join(' ')}`.toLowerCase();
 
-      // Exact name match → high score
-      if (lowerInput.includes(skillName) || skillName.includes(lowerInput)) {
-        score += 10;
-      }
-
-      // Tag match
-      for (const tag of skillTags) {
-        if (lowerInput.includes(tag)) score += 5;
-        for (const word of words) {
-          if (tag.includes(word) || word.includes(tag)) score += 2;
+      // BM25-lite: IDF ponderado por coincidencia de palabras
+      for (const word of words) {
+        if (skillText.includes(word)) {
+          const tf = skillText.split(word).length - 1;
+          const idf = Math.log((candidateSkills.length + 1) / (tf + 1));
+          score += idf;
         }
       }
 
-      // Description keyword overlap
-      for (const word of words) {
-        if (skillDesc.includes(word)) score += 1;
-      }
+      // Vector similarity (TF-IDF embeddings)
+      try {
+        const inputEmb = await this.embeddingService.generate(input, { dimension: 384 });
+        const skillEmb = await this.embeddingService.generate(skillText, { dimension: 384 });
+        const cosine = this.embeddingService.cosineSimilarity(inputEmb.vector, skillEmb.vector);
+        score += cosine * 5;
+      } catch { /* fallback: solo BM25-lite */ }
 
-      // Name word overlap
-      for (const word of words) {
-        if (skillName.includes(word)) score += 3;
-      }
-
-      if (score > 0 && (!bestSkill || score > bestSkill.score)) {
-        bestSkill = { name: skill.name, score, promptTemplate: skill.promptTemplate };
+      if (score > bestScore) {
+        bestScore = score;
+        bestSkill = skill;
       }
     }
 
-    if (bestSkill && bestSkill.score >= 3) {
+    const threshold = 1.5;
+    let result = permanentPrompts;
+
+    if (bestSkill && bestScore >= threshold) {
       this.agentLogger.info(
         this.agentId,
-        `🎯 [ROUTER] Skill "${bestSkill.name}" matched (score: ${bestSkill.score})`,
+        `🎯 [ROUTER] Skill "${bestSkill.name}" matched (score: ${bestScore.toFixed(2)})`,
       );
-      return `\n\n--- AGENCY SKILL: ${bestSkill.name} ---\n${bestSkill.promptTemplate}\n--- END AGENCY SKILL ---\n\n`;
+      result += `\n\n--- AGENCY SKILL: ${bestSkill.name} ---\n${bestSkill.promptTemplate}\n--- END AGENCY SKILL ---\n\n`;
     }
 
-    return '';
+    return result;
   }
 
   private getAgentMap(): Record<string, string> {

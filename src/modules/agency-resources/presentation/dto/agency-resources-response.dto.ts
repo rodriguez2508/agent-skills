@@ -9,13 +9,17 @@ export class AgencySkillDto {
   name!: string;
   description!: string;
   promptTemplate!: string;
-  agentType!: string;
+  categoryId!: string | null;
+  categoryName!: string | null;
+  categorySlug!: string | null;
+  categoryIcon!: string | null;
   tags!: string[];
   usageCount!: number;
   rating!: number;
   inputVariables!: string[];
   isPublished!: boolean;
   isActive!: boolean;
+  isPermanent!: boolean;
   createdAt!: Date;
   updatedAt!: Date;
 
@@ -26,13 +30,17 @@ export class AgencySkillDto {
     dto.name = entity.name;
     dto.description = entity.description;
     dto.promptTemplate = entity.promptTemplate;
-    dto.agentType = entity.agentType;
+    dto.categoryId = entity.categoryId ?? null;
+    dto.categoryName = entity.category?.name ?? null;
+    dto.categorySlug = entity.category?.slug ?? null;
+    dto.categoryIcon = entity.category?.icon ?? null;
     dto.tags = entity.tags;
     dto.usageCount = entity.usageCount;
     dto.rating = Number(entity.rating);
     dto.inputVariables = entity.inputVariables;
     dto.isPublished = entity.isPublished;
     dto.isActive = entity.isActive;
+    dto.isPermanent = entity.isPermanent;
     dto.createdAt = entity.createdAt;
     dto.updatedAt = entity.updatedAt;
     return dto;
